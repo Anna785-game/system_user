@@ -1,0 +1,758 @@
+PROJECT DUMP
+================================================================================
+Projet : systeme_presence_user
+Généré le : 2026-08-19 15:33:15
+Fichiers inclus : 12
+================================================================================
+
+ARBORESCENCE
+--------------------------------------------------------------------------------
+systeme_presence_user/
+├── public/
+│   ├── favicon.svg
+│   └── icons.svg
+├── src/
+│   ├── api/
+│   │   └── api.js
+│   ├── assets/
+│   │   ├── hero.png
+│   │   ├── react.svg
+│   │   └── vite.svg
+│   ├── components/
+│   │   └── TimelineItem.jsx
+│   ├── constants/
+│   │   ├── events.js
+│   │   └── postes.js
+│   ├── hooks/
+│   │   └── usePolling.js
+│   ├── pages/
+│   │   ├── Connexion.jsx
+│   │   ├── Home.jsx
+│   │   ├── Parcours.jsx
+│   │   └── Postuler.jsx
+│   ├── styles/
+│   │   ├── global.css
+│   │   └── tokens.css
+│   ├── App.css
+│   ├── App.jsx
+│   ├── index.css
+│   └── main.jsx
+├── .oxlintrc.json
+├── index.html
+├── v.txt
+├── v3.txt
+├── vercel.json
+└── vite.config.js
+
+CONTENU DES FICHIERS
+================================================================================
+
+# src/api/api.js
+--------------------------------------------------------------------------------
+const API_BASE = import.meta.env.VITE_API_BASE;
+
+async function appel(url, options = {}) {
+  const res = await fetch(url, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...(options.headers || {}),
+    },
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) {
+    const erreur = new Error(
+      (typeof data?.detail === "string" ? data.detail : null) ||
+        data?.erreur ||
+        `Erreur ${res.status}`
+    );
+    erreur.status = res.status;
+    erreur.data = data;
+    throw erreur;
+  }
+  return data;
+}
+
+/**
+ * Client aligné sur fastapi_pointage.
+ *
+ * Inscription publique : POST /candidats/inscription { nom }
+ * Suivi : GET /candidats/mon-statut?candidat_id=
+ *
+ * Badge / simulation / visage : gérés côté kiosque + admin, pas sur le téléphone.
+ */
+export const api = {
+  /** Crée (ou renvoie l'existant en attente/actif) un candidat. */
+  postuler: (nom) =>
+    appel(`${API_BASE}/candidats/inscription`, {
+      method: "POST",
+      body: JSON.stringify({ nom }),
+    }),
+
+  /**
+   * "Connexion" par id déjà connu (stocké en localStorage à l'inscription).
+   * Pas de lookup par email côté API publique.
+   */
+  recupererCandidat: (id) =>
+    appel(
+      `${API_BASE}/candidats/mon-statut?candidat_id=${encodeURIComponent(id)}`
+    ),
+};
+
+export { API_BASE };
+
+================================================================================
+
+# src/App.jsx
+--------------------------------------------------------------------------------
+import { BrowserRouter, Routes, Route } from "react-router-dom";
+import Home from "./pages/Home";
+import Postuler from "./pages/Postuler";
+import Connexion from "./pages/Connexion";
+import Parcours from "./pages/Parcours";
+
+export default function App() {
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<Home />} />
+        <Route path="/postuler" element={<Postuler />} />
+        <Route path="/connexion" element={<Connexion />} />
+        <Route path="/parcours" element={<Parcours />} />
+      </Routes>
+    </BrowserRouter>
+  );
+}
+
+================================================================================
+
+# src/components/TimelineItem.jsx
+--------------------------------------------------------------------------------
+import { configEvenement } from "../constants/events";
+
+const COULEURS = {
+  amber: ["var(--amber)", "var(--amber-dim)"],
+  green: ["var(--green)", "var(--green-dim)"],
+  red: ["var(--red)", "var(--red-dim)"],
+  blue: ["var(--blue)", "var(--blue-dim)"],
+};
+
+function formatHeure(iso) {
+  return new Date(iso).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+}
+
+export default function TimelineItem({ evenement, estLeDernier }) {
+  const config = configEvenement(evenement.type);
+  const ton = typeof config.ton === "function" ? config.ton(evenement.data) : config.ton;
+  const [couleur, couleurDim] = COULEURS[ton] || COULEURS.blue;
+
+  return (
+    <div
+      className={`feed-item ${config.majeur ? "majeur" : ""} ${estLeDernier ? "actuel" : ""}`}
+      style={{ "--tone": couleur, "--tone-dim": couleurDim }}
+    >
+      <div className="horodatage">{formatHeure(evenement.ts)}</div>
+      <div className="libelle">{config.libelle(evenement.data)}</div>
+    </div>
+  );
+}
+
+================================================================================
+
+# src/constants/events.js
+--------------------------------------------------------------------------------
+import { posteParId } from "./postes";
+
+// majeur: true => rendu en "grand texte" dans le feed (les moments clés du
+// parcours). false => ligne discrète (utile pour garder le fil sans saturer
+// l'écran).
+export const CONFIG_EVENEMENTS = {
+  candidature: {
+    majeur: false,
+    ton: "blue",
+    libelle: () => "Candidature envoyée.",
+  },
+  en_attente: {
+    majeur: true,
+    ton: "amber",
+    libelle: () => "Vous êtes en attente.",
+  },
+  selection: {
+    majeur: true,
+    ton: "green",
+    libelle: () => "Vous avez été sélectionné !",
+  },
+  refus: {
+    majeur: true,
+    ton: "red",
+    libelle: () => "Candidature non retenue cette fois.",
+  },
+  action_enregistrer_visage: {
+    majeur: true,
+    ton: "blue",
+    libelle: () => "Enregistrez votre visage d'abord.",
+  },
+  visage_ok: {
+    majeur: false,
+    ton: "green",
+    libelle: () => "Visage enregistré.",
+  },
+  poste_attribue: {
+    majeur: true,
+    ton: (d) => (posteParId(d.poste).ton === "succes" ? "green" : posteParId(d.poste).ton === "echec" ? "red" : "blue"),
+    libelle: (d) => posteParId(d.poste).message,
+  },
+  entree: {
+    majeur: true,
+    ton: "green",
+    libelle: (d) => `Vous êtes entré à ${d.heure}.`,
+  },
+  sortie: {
+    majeur: true,
+    ton: "amber",
+    libelle: (d) => `Vous êtes sorti à ${d.heure}.`,
+  },
+  jour_simulation: {
+    majeur: true,
+    ton: "blue",
+    libelle: (d) => `Jour ${d.jour} : ${d.anecdote}`,
+  },
+  licenciement: {
+    majeur: true,
+    ton: "red",
+    libelle: () => "Vous êtes viré.",
+  },
+};
+
+export function configEvenement(type) {
+  return CONFIG_EVENEMENTS[type] || { majeur: false, ton: "blue", libelle: () => type };
+}
+
+================================================================================
+
+# src/constants/postes.js
+--------------------------------------------------------------------------------
+// Synchronisé avec /postes/seed-demo du backend
+export const POSTES = {
+  Boss: {
+    label: "Grand Patron",
+    ton: "succes",
+    message: "Bien joué : avec votre CV, vous êtes devenu le boss.",
+  },
+  Vendeur: {
+    label: "Vendeur",
+    ton: "neutre",
+    message: "Vous avez le contact facile. Direction le terrain, en vendeur.",
+  },
+  "Nettoyeur de toilettes": {
+    label: "Nettoyeur de toilettes",
+    ton: "echec",
+    message:
+      "Malheureusement, le grand patron vous a mis comme nettoyeur de toilettes.",
+  },
+};
+
+export function posteParId(id) {
+  return (
+    POSTES[id] || {
+      label: id || "Poste",
+      ton: "neutre",
+      message: "Poste attribué.",
+    }
+  );
+}
+
+================================================================================
+
+# src/hooks/usePolling.js
+--------------------------------------------------------------------------------
+import { useEffect, useRef, useState } from "react";
+
+// Interroge `fn` toutes les `intervalleMs` et expose le dernier résultat.
+// Utilisé pour que l'écran candidat réagisse aux actions prises côté front
+// admin (sélection, licenciement, ...) sans que l'utilisateur ait à raffraîchir.
+export function usePolling(fn, intervalleMs = 3000, deps = []) {
+  const [donnees, setDonnees] = useState(null);
+  const [erreur, setErreur] = useState(null);
+  const enCours = useRef(false);
+
+  useEffect(() => {
+    let annule = false;
+
+    async function tick() {
+      if (enCours.current) return;
+      enCours.current = true;
+      try {
+        const resultat = await fn();
+        if (!annule) {
+          setDonnees(resultat);
+          setErreur(null);
+        }
+      } catch (e) {
+        if (!annule) setErreur(e);
+      } finally {
+        enCours.current = false;
+      }
+    }
+
+    tick();
+    const id = setInterval(tick, intervalleMs);
+    return () => {
+      annule = true;
+      clearInterval(id);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, deps);
+
+  return { donnees, erreur, setDonnees };
+}
+
+================================================================================
+
+# src/main.jsx
+--------------------------------------------------------------------------------
+import React from "react";
+import ReactDOM from "react-dom/client";
+import App from "./App";
+import "./styles/global.css";
+
+ReactDOM.createRoot(document.getElementById("root")).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);
+
+================================================================================
+
+# src/pages/Connexion.jsx
+--------------------------------------------------------------------------------
+import { useState } from "react";
+import { useNavigate, Link } from "react-router-dom";
+import { api } from "../api/api";
+
+export default function Connexion() {
+  const [candidatId, setCandidatId] = useState("");
+  const [enCours, setEnCours] = useState(false);
+  const [erreur, setErreur] = useState(null);
+  const navigate = useNavigate();
+
+  async function envoyer(e) {
+    e.preventDefault();
+    setErreur(null);
+    setEnCours(true);
+    try {
+      const id = candidatId.trim();
+      const candidat = await api.recupererCandidat(id);
+      localStorage.setItem("candidatId", String(candidat.id));
+      navigate("/parcours");
+    } catch (e) {
+      setErreur(
+        e.status === 404
+          ? "Aucun dossier avec cet identifiant."
+          : e.message
+      );
+    } finally {
+      setEnCours(false);
+    }
+  }
+
+  return (
+    <div className="ecran">
+      <div className="entete-systeme">
+        <Link to="/" style={{ color: "inherit", textDecoration: "none" }}>
+          &larr; Retour
+        </Link>
+        <span>CONNEXION</span>
+      </div>
+
+      <div className="ecran-contenu" style={{ justifyContent: "center" }}>
+        <h1 className="grand-titre" style={{ marginBottom: 6 }}>
+          Reprendre
+        </h1>
+        <p className="sous-texte" style={{ marginBottom: 28 }}>
+          Saisissez l&apos;identifiant reçu à l&apos;inscription (affiché sur
+          votre parcours, ex. #000042).
+        </p>
+
+        <form onSubmit={envoyer}>
+          <div className="groupe-champ">
+            <label htmlFor="candidatId">Identifiant candidat</label>
+            <input
+              id="candidatId"
+              className="champ"
+              placeholder="Ex. 42"
+              value={candidatId}
+              onChange={(e) => setCandidatId(e.target.value)}
+              required
+              inputMode="numeric"
+            />
+          </div>
+
+          {erreur && <p className="erreur-form">{erreur}</p>}
+
+          <button
+            className="bouton bouton-primaire bouton-bloc"
+            disabled={enCours}
+          >
+            {enCours ? "Connexion..." : "Voir mon parcours"}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+================================================================================
+
+# src/pages/Home.jsx
+--------------------------------------------------------------------------------
+import { Link } from "react-router-dom";
+
+export default function Home() {
+  return (
+    <div className="ecran">
+      <div className="entete-systeme">
+        <span>
+          <span className="led blue" />
+          Carrière Express
+        </span>
+        <span>ACCUEIL</span>
+      </div>
+
+      <nav
+        style={{
+          display: "flex",
+          justifyContent: "flex-end",
+          gap: 18,
+          padding: "18px 22px 0",
+        }}
+      >
+        <Link
+          to="/postuler"
+          className="code-mono"
+          style={{
+            color: "var(--text-dim)",
+            fontSize: 13,
+            textDecoration: "none",
+          }}
+        >
+          Postuler
+        </Link>
+        <Link
+          to="/connexion"
+          className="code-mono"
+          style={{
+            color: "var(--text-dim)",
+            fontSize: 13,
+            textDecoration: "none",
+          }}
+        >
+          Reprendre
+        </Link>
+      </nav>
+
+      <div
+        className="ecran-contenu"
+        style={{
+          justifyContent: "center",
+          alignItems: "center",
+          textAlign: "center",
+          gap: 28,
+        }}
+      >
+        <div>
+          <h1 className="grand-titre">
+            Inscrivez-vous
+            <br />
+            <span style={{ color: "var(--text-dim)" }}>(postulez)</span>
+            <br />
+            d&apos;abord.
+          </h1>
+          <p className="sous-texte">Votre carrière commence sur cet écran.</p>
+        </div>
+
+        <Link
+          to="/postuler"
+          className="bouton bouton-primaire"
+          style={{ padding: "16px 34px" }}
+        >
+          Postuler
+        </Link>
+
+        <Link
+          to="/connexion"
+          className="sous-texte"
+          style={{ textDecoration: "underline", color: "var(--text-dim)" }}
+        >
+          Déjà postulé ? Reprendre avec mon identifiant
+        </Link>
+      </div>
+    </div>
+  );
+}
+
+================================================================================
+
+# src/pages/Parcours.jsx
+--------------------------------------------------------------------------------
+import { useEffect } from "react";
+import { useNavigate, Link } from "react-router-dom";
+import { api } from "../api/api";
+import { usePolling } from "../hooks/usePolling";
+import { posteParId } from "../constants/postes";
+
+const LEDS_PAR_STATUT = {
+  attente: "amber",
+  actif: "green",
+  historique: "red",
+};
+
+const LIBELLES_STATUT = {
+  attente: "En attente",
+  actif: "Sélectionné",
+  historique: "Parcours terminé",
+};
+
+export default function Parcours() {
+  const navigate = useNavigate();
+  const candidatId = localStorage.getItem("candidatId");
+
+  useEffect(() => {
+    if (!candidatId) navigate("/");
+  }, [candidatId, navigate]);
+
+  const { donnees: candidat, erreur } = usePolling(
+    () => api.recupererCandidat(candidatId),
+    2500,
+    [candidatId]
+  );
+
+  if (!candidatId) return null;
+
+  if (erreur && !candidat) {
+    return (
+      <div className="ecran">
+        <div className="entete-systeme">
+          <Link to="/" style={{ color: "inherit", textDecoration: "none" }}>
+            &larr; Accueil
+          </Link>
+          <span>PARCOURS</span>
+        </div>
+        <div
+          className="ecran-contenu"
+          style={{ justifyContent: "center", alignItems: "center", gap: 16 }}
+        >
+          <p className="sous-texte" style={{ color: "var(--red)" }}>
+            {erreur.status === 404
+              ? "Dossier introuvable. Réinscrivez-vous."
+              : erreur.message}
+          </p>
+          <button
+            className="bouton bouton-primaire"
+            onClick={() => {
+              localStorage.removeItem("candidatId");
+              navigate("/postuler");
+            }}
+          >
+            Postuler à nouveau
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!candidat) {
+    return (
+      <div className="ecran">
+        <div
+          className="ecran-contenu"
+          style={{ justifyContent: "center", alignItems: "center" }}
+        >
+          <p className="sous-texte">Chargement de votre dossier...</p>
+        </div>
+      </div>
+    );
+  }
+
+  const statut = candidat.statut;
+  const poste = candidat.poste_attribue
+    ? posteParId(candidat.poste_attribue)
+    : null;
+  const idCourt = String(candidat.id).padStart(6, "0").toUpperCase();
+
+  return (
+    <div className="ecran">
+      <div className="entete-systeme">
+        <span>
+          <span className={`led ${LEDS_PAR_STATUT[statut] || "blue"}`} />
+          {candidat.nom}
+        </span>
+        <span className="code-mono">#{idCourt}</span>
+      </div>
+
+      <div className="ecran-contenu" style={{ gap: 24, paddingTop: 32 }}>
+        <div>
+          <p className="sous-texte" style={{ marginBottom: 4 }}>
+            Statut
+          </p>
+          <h1 className="grand-titre" style={{ fontSize: "1.6rem" }}>
+            {LIBELLES_STATUT[statut] || statut}
+          </h1>
+        </div>
+
+        {statut === "attente" && (
+          <div className="carte-badge">
+            <p className="sous-texte" style={{ margin: 0, color: "var(--text)" }}>
+              Votre candidature est en file d&apos;attente.
+            </p>
+            <p className="sous-texte" style={{ marginTop: 8, marginBottom: 0 }}>
+              Un responsable va bientôt vous appeler. Gardez cet écran ouvert :
+              il se mettra à jour automatiquement.
+            </p>
+          </div>
+        )}
+
+        {statut === "actif" && !poste && (
+          <div className="carte-badge">
+            <p
+              className="sous-texte"
+              style={{ marginTop: 0, marginBottom: 4, color: "var(--green)" }}
+            >
+              Vous avez été sélectionné !
+            </p>
+            <p className="sous-texte" style={{ marginTop: 0, marginBottom: 0 }}>
+              Rendez-vous devant l&apos;écran affiché en face de vous. Placez-vous
+              dans le cadre quand il affiche « Veuillez enregistrer votre visage
+              » : la photo est prise automatiquement.
+            </p>
+          </div>
+        )}
+
+        {statut === "actif" && poste && (
+          <div className="carte-badge" style={{ borderColor: "var(--green)" }}>
+            <p
+              className="sous-texte"
+              style={{ marginTop: 0, marginBottom: 4, color: "var(--green)" }}
+            >
+              Poste attribué : {poste.label}
+            </p>
+            <p className="sous-texte" style={{ marginTop: 0, marginBottom: 0 }}>
+              {poste.message}
+            </p>
+            <p className="sous-texte" style={{ marginTop: 12, marginBottom: 0 }}>
+              Présentez-vous au kiosque (carte + visage) pour entrer dans
+              l&apos;entreprise. La suite se joue sur place.
+            </p>
+          </div>
+        )}
+
+        {statut === "historique" && (
+          <div className="carte-badge" style={{ borderColor: "var(--red)" }}>
+            <p
+              className="sous-texte"
+              style={{ marginTop: 0, marginBottom: 0, color: "var(--text)" }}
+            >
+              {poste
+                ? `Parcours terminé. Dernier poste : ${poste.label}.`
+                : "Votre parcours est terminé (candidature non retenue ou fin de simulation)."}
+            </p>
+          </div>
+        )}
+
+        <p className="sous-texte" style={{ fontSize: 12, marginTop: "auto" }}>
+          Identifiant : <span className="code-mono">#{idCourt}</span> — notez-le
+          pour reprendre plus tard.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+================================================================================
+
+# src/pages/Postuler.jsx
+--------------------------------------------------------------------------------
+import { useState } from "react";
+import { useNavigate, Link } from "react-router-dom";
+import { api } from "../api/api";
+
+export default function Postuler() {
+  const [nom, setNom] = useState("");
+  const [enCours, setEnCours] = useState(false);
+  const [erreur, setErreur] = useState(null);
+  const navigate = useNavigate();
+
+  async function envoyer(e) {
+    e.preventDefault();
+    setErreur(null);
+    setEnCours(true);
+    try {
+      const candidat = await api.postuler(nom.trim());
+      localStorage.setItem("candidatId", String(candidat.id));
+      navigate("/parcours");
+    } catch (e) {
+      setErreur(e.message);
+    } finally {
+      setEnCours(false);
+    }
+  }
+
+  return (
+    <div className="ecran">
+      <div className="entete-systeme">
+        <Link to="/" style={{ color: "inherit", textDecoration: "none" }}>
+          &larr; Retour
+        </Link>
+        <span>CANDIDATURE</span>
+      </div>
+
+      <div className="ecran-contenu" style={{ justifyContent: "center" }}>
+        <h1 className="grand-titre" style={{ marginBottom: 6 }}>
+          Postuler
+        </h1>
+        <p className="sous-texte" style={{ marginBottom: 28 }}>
+          Votre nom suffit. Le reste se joue à l&apos;entretien.
+        </p>
+
+        <form onSubmit={envoyer}>
+          <div className="groupe-champ">
+            <label htmlFor="nom">Nom complet</label>
+            <input
+              id="nom"
+              className="champ"
+              placeholder="Ex. Rina Andria"
+              value={nom}
+              onChange={(e) => setNom(e.target.value)}
+              required
+              maxLength={50}
+            />
+          </div>
+
+          {erreur && <p className="erreur-form">{erreur}</p>}
+
+          <button
+            className="bouton bouton-primaire bouton-bloc"
+            disabled={enCours}
+          >
+            {enCours ? "Envoi..." : "Envoyer ma candidature"}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+================================================================================
+
+# vite.config.js
+--------------------------------------------------------------------------------
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+
+export default defineConfig({
+  plugins: [react()],
+  server: { port: 5173 },
+});
+
+================================================================================
+

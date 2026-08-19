@@ -1,20 +1,15 @@
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { api } from "../api/api";
 import { usePolling } from "../hooks/usePolling";
 import { posteParId } from "../constants/postes";
 
-const LEDS_PAR_STATUT = {
-  attente: "amber",
-  actif: "green",
-  historique: "red",
-};
+// Doit être >= SPIN_DURATION_MS (6800ms) côté sys_admin, + petite marge
+// pour laisser le temps au poll (2.5s) de rattraper l'event.
+const DELAI_REVELATION_MS = 8000;
 
-const LIBELLES_STATUT = {
-  attente: "En attente",
-  actif: "Sélectionné",
-  historique: "Parcours terminé",
-};
+const LEDS_PAR_STATUT = { attente: "amber", actif: "green", historique: "red" };
+const LIBELLES_STATUT = { attente: "En attente", actif: "Sélectionné", historique: "Parcours terminé" };
 
 export default function Parcours() {
   const navigate = useNavigate();
@@ -30,32 +25,43 @@ export default function Parcours() {
     [candidatId]
   );
 
+  // Empêche d'afficher le poste avant que la roulette admin ait fini de tourner.
+  const [posteRevele, setPosteRevele] = useState(
+    () => localStorage.getItem(`posteRevele_${candidatId}`) === "1"
+  );
+  const timerRef = useRef(null);
+
+  useEffect(() => {
+    if (candidat?.poste_attribue && !posteRevele && !timerRef.current) {
+      timerRef.current = setTimeout(() => {
+        setPosteRevele(true);
+        localStorage.setItem(`posteRevele_${candidatId}`, "1");
+      }, DELAI_REVELATION_MS);
+    }
+    return () => {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+    };
+  }, [candidat?.poste_attribue, posteRevele, candidatId]);
+
   if (!candidatId) return null;
 
   if (erreur && !candidat) {
     return (
       <div className="ecran">
         <div className="entete-systeme">
-          <Link to="/" style={{ color: "inherit", textDecoration: "none" }}>
-            &larr; Accueil
-          </Link>
+          <Link to="/" style={{ color: "inherit", textDecoration: "none" }}>&larr; Accueil</Link>
           <span>PARCOURS</span>
         </div>
-        <div
-          className="ecran-contenu"
-          style={{ justifyContent: "center", alignItems: "center", gap: 16 }}
-        >
+        <div className="ecran-contenu" style={{ justifyContent: "center", alignItems: "center", gap: 16 }}>
           <p className="sous-texte" style={{ color: "var(--red)" }}>
-            {erreur.status === 404
-              ? "Dossier introuvable. Réinscrivez-vous."
-              : erreur.message}
+            {erreur.status === 404 ? "Dossier introuvable. Réinscrivez-vous." : erreur.message}
           </p>
           <button
             className="bouton bouton-primaire"
-            onClick={() => {
-              localStorage.removeItem("candidatId");
-              navigate("/postuler");
-            }}
+            onClick={() => { localStorage.removeItem("candidatId"); navigate("/postuler"); }}
           >
             Postuler à nouveau
           </button>
@@ -67,10 +73,7 @@ export default function Parcours() {
   if (!candidat) {
     return (
       <div className="ecran">
-        <div
-          className="ecran-contenu"
-          style={{ justifyContent: "center", alignItems: "center" }}
-        >
+        <div className="ecran-contenu" style={{ justifyContent: "center", alignItems: "center" }}>
           <p className="sous-texte">Chargement de votre dossier...</p>
         </div>
       </div>
@@ -78,7 +81,9 @@ export default function Parcours() {
   }
 
   const statut = candidat.statut;
-  const poste = candidat.poste_attribue
+  // Si le candidat n'est plus "actif" (retiré, viré...), on révèle quand même
+  // directement : le délai n'a de sens que pendant l'attente en direct.
+  const poste = candidat.poste_attribue && (posteRevele || statut !== "actif")
     ? posteParId(candidat.poste_attribue)
     : null;
   const idCourt = String(candidat.id).padStart(6, "0").toUpperCase();
