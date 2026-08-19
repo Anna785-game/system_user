@@ -3,7 +3,7 @@ import { useNavigate, Link } from "react-router-dom";
 import { api } from "../api/api";
 
 export default function Connexion() {
-  const [email, setEmail] = useState("");
+  const [candidatId, setCandidatId] = useState("");
   const [enCours, setEnCours] = useState(false);
   const [erreur, setErreur] = useState(null);
   const navigate = useNavigate();
@@ -13,11 +13,16 @@ export default function Connexion() {
     setErreur(null);
     setEnCours(true);
     try {
-      const candidat = await api.connexion(email.trim());
-      localStorage.setItem("candidatId", candidat.id);
+      const id = candidatId.trim();
+      const candidat = await api.recupererCandidat(id);
+      localStorage.setItem("candidatId", String(candidat.id));
       navigate("/parcours");
     } catch (e) {
-      setErreur(e.status === 404 ? "Aucune candidature avec cet email." : e.message);
+      setErreur(
+        e.status === 404
+          ? "Aucun dossier avec cet identifiant."
+          : e.message
+      );
     } finally {
       setEnCours(false);
     }
@@ -26,34 +31,42 @@ export default function Connexion() {
   return (
     <div className="ecran">
       <div className="entete-systeme">
-        <Link to="/" style={{ color: "inherit", textDecoration: "none" }}>&larr; Retour</Link>
+        <Link to="/" style={{ color: "inherit", textDecoration: "none" }}>
+          &larr; Retour
+        </Link>
         <span>CONNEXION</span>
       </div>
 
       <div className="ecran-contenu" style={{ justifyContent: "center" }}>
-        <h1 className="grand-titre" style={{ marginBottom: 6 }}>Connexion</h1>
+        <h1 className="grand-titre" style={{ marginBottom: 6 }}>
+          Reprendre
+        </h1>
         <p className="sous-texte" style={{ marginBottom: 28 }}>
-          Retrouvez l'avancement de votre candidature.
+          Saisissez l&apos;identifiant reçu à l&apos;inscription (affiché sur
+          votre parcours, ex. #000042).
         </p>
 
         <form onSubmit={envoyer}>
           <div className="groupe-champ">
-            <label htmlFor="email">Email</label>
+            <label htmlFor="candidatId">Identifiant candidat</label>
             <input
-              id="email"
-              type="email"
+              id="candidatId"
               className="champ"
-              placeholder="vous@exemple.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              placeholder="Ex. 42"
+              value={candidatId}
+              onChange={(e) => setCandidatId(e.target.value)}
               required
+              inputMode="numeric"
             />
           </div>
 
           {erreur && <p className="erreur-form">{erreur}</p>}
 
-          <button className="bouton bouton-primaire bouton-bloc" disabled={enCours}>
-            {enCours ? "Connexion..." : "Se connecter"}
+          <button
+            className="bouton bouton-primaire bouton-bloc"
+            disabled={enCours}
+          >
+            {enCours ? "Connexion..." : "Voir mon parcours"}
           </button>
         </form>
       </div>

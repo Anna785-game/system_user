@@ -4,7 +4,6 @@ import { api } from "../api/api";
 
 export default function Postuler() {
   const [nom, setNom] = useState("");
-  const [email, setEmail] = useState("");
   const [enCours, setEnCours] = useState(false);
   const [erreur, setErreur] = useState(null);
   const navigate = useNavigate();
@@ -14,17 +13,11 @@ export default function Postuler() {
     setErreur(null);
     setEnCours(true);
     try {
-      const candidat = await api.postuler(nom.trim(), email.trim());
-      localStorage.setItem("candidatId", candidat.id);
+      const candidat = await api.postuler(nom.trim());
+      localStorage.setItem("candidatId", String(candidat.id));
       navigate("/parcours");
     } catch (e) {
-      if (e.status === 409 && e.data?.candidat) {
-        // Email déjà connu : on connecte directement plutôt que de bloquer.
-        localStorage.setItem("candidatId", e.data.candidat.id);
-        navigate("/parcours");
-      } else {
-        setErreur(e.message);
-      }
+      setErreur(e.message);
     } finally {
       setEnCours(false);
     }
@@ -33,14 +26,18 @@ export default function Postuler() {
   return (
     <div className="ecran">
       <div className="entete-systeme">
-        <Link to="/" style={{ color: "inherit", textDecoration: "none" }}>&larr; Retour</Link>
+        <Link to="/" style={{ color: "inherit", textDecoration: "none" }}>
+          &larr; Retour
+        </Link>
         <span>CANDIDATURE</span>
       </div>
 
       <div className="ecran-contenu" style={{ justifyContent: "center" }}>
-        <h1 className="grand-titre" style={{ marginBottom: 6 }}>Postuler</h1>
+        <h1 className="grand-titre" style={{ marginBottom: 6 }}>
+          Postuler
+        </h1>
         <p className="sous-texte" style={{ marginBottom: 28 }}>
-          Deux infos suffisent, le reste se joue à l'entretien.
+          Votre nom suffit. Le reste se joue à l&apos;entretien.
         </p>
 
         <form onSubmit={envoyer}>
@@ -53,25 +50,16 @@ export default function Postuler() {
               value={nom}
               onChange={(e) => setNom(e.target.value)}
               required
-            />
-          </div>
-
-          <div className="groupe-champ">
-            <label htmlFor="email">Email</label>
-            <input
-              id="email"
-              type="email"
-              className="champ"
-              placeholder="vous@exemple.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
+              maxLength={50}
             />
           </div>
 
           {erreur && <p className="erreur-form">{erreur}</p>}
 
-          <button className="bouton bouton-primaire bouton-bloc" disabled={enCours}>
+          <button
+            className="bouton bouton-primaire bouton-bloc"
+            disabled={enCours}
+          >
             {enCours ? "Envoi..." : "Envoyer ma candidature"}
           </button>
         </form>

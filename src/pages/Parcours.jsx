@@ -1,143 +1,172 @@
-import { useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect } from "react";
+import { useNavigate, Link } from "react-router-dom";
 import { api } from "../api/api";
 import { usePolling } from "../hooks/usePolling";
-import TimelineItem from "../components/TimelineItem";
+import { posteParId } from "../constants/postes";
 
 const LEDS_PAR_STATUT = {
-  en_attente: "amber",
-  selectionne: "green",
-  refuse: "red",
-  vire: "red",
+  attente: "amber",
+  actif: "green",
+  historique: "red",
+};
+
+const LIBELLES_STATUT = {
+  attente: "En attente",
+  actif: "Sélectionné",
+  historique: "Parcours terminé",
 };
 
 export default function Parcours() {
   const navigate = useNavigate();
   const candidatId = localStorage.getItem("candidatId");
-  const feedRef = useRef(null);
-  const [actionEnCours, setActionEnCours] = useState(false);
 
   useEffect(() => {
     if (!candidatId) navigate("/");
   }, [candidatId, navigate]);
 
-  const { donnees: candidat, setDonnees } = usePolling(
+  const { donnees: candidat, erreur } = usePolling(
     () => api.recupererCandidat(candidatId),
     2500,
     [candidatId]
   );
 
-  useEffect(() => {
-    feedRef.current?.scrollTo({ top: feedRef.current.scrollHeight, behavior: "smooth" });
-  }, [candidat?.historique?.length]);
+  if (!candidatId) return null;
+
+  if (erreur && !candidat) {
+    return (
+      <div className="ecran">
+        <div className="entete-systeme">
+          <Link to="/" style={{ color: "inherit", textDecoration: "none" }}>
+            &larr; Accueil
+          </Link>
+          <span>PARCOURS</span>
+        </div>
+        <div
+          className="ecran-contenu"
+          style={{ justifyContent: "center", alignItems: "center", gap: 16 }}
+        >
+          <p className="sous-texte" style={{ color: "var(--red)" }}>
+            {erreur.status === 404
+              ? "Dossier introuvable. Réinscrivez-vous."
+              : erreur.message}
+          </p>
+          <button
+            className="bouton bouton-primaire"
+            onClick={() => {
+              localStorage.removeItem("candidatId");
+              navigate("/postuler");
+            }}
+          >
+            Postuler à nouveau
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   if (!candidat) {
     return (
       <div className="ecran">
-        <div className="ecran-contenu" style={{ justifyContent: "center", alignItems: "center" }}>
+        <div
+          className="ecran-contenu"
+          style={{ justifyContent: "center", alignItems: "center" }}
+        >
           <p className="sous-texte">Chargement de votre dossier...</p>
         </div>
       </div>
     );
   }
 
-  const dernier = candidat.historique[candidat.historique.length - 1];
-  // On attend que le visage soit enregistré : ça se passe désormais sur
-  // l'écran physique (front_ecran), jamais sur le téléphone du candidat.
-  const attenteVisage = dernier?.type === "action_enregistrer_visage" && !candidat.visageEnregistre;
-  const visageVientDetreConfirme = dernier?.type === "visage_ok";
-  const posteVientDetreAttribue = dernier?.type === "poste_attribue";
-  const parcoursTermine = candidat.statut === "vire" || candidat.statut === "refuse";
-
-  async function badge(type) {
-    setActionEnCours(true);
-    try {
-      const maj = await api.badge(candidatId, type);
-      setDonnees(maj);
-    } finally {
-      setActionEnCours(false);
-    }
-  }
-
-  async function jourSuivant() {
-    setActionEnCours(true);
-    try {
-      const maj = await api.jourSuivant(candidatId);
-      setDonnees(maj);
-    } finally {
-      setActionEnCours(false);
-    }
-  }
+  const statut = candidat.statut;
+  const poste = candidat.poste_attribue
+    ? posteParId(candidat.poste_attribue)
+    : null;
+  const idCourt = String(candidat.id).padStart(6, "0").toUpperCase();
 
   return (
     <div className="ecran">
       <div className="entete-systeme">
         <span>
-          <span className={`led ${LEDS_PAR_STATUT[candidat.statut] || "blue"}`} />
+          <span className={`led ${LEDS_PAR_STATUT[statut] || "blue"}`} />
           {candidat.nom}
         </span>
-        <span className="code-mono">#{candidat.id.slice(0, 6).toUpperCase()}</span>
+        <span className="code-mono">#{idCourt}</span>
       </div>
 
-      <div ref={feedRef} className="feed">
-        {candidat.historique.map((ev, i) => (
-          <TimelineItem
-            key={ev.id}
-            evenement={ev}
-            estLeDernier={i === candidat.historique.length - 1}
-          />
-        ))}
-
-        {/* Étape d'action inline : on ne fait plus rien avec la caméra ici.
-            On redirige le candidat vers l'écran physique posé devant lui. */}
-        {attenteVisage && (
-          <div className="carte-badge">
-            <p className="sous-texte" style={{ marginTop: 0, marginBottom: 4, color: "var(--text)" }}>
-              Rendez-vous devant l'écran affiché en face de vous.
-            </p>
-            <p className="sous-texte" style={{ marginTop: 0 }}>
-              Placez-vous dedans quand l'écran affiche « Veuillez enregistrer
-              votre visage » : la photo est prise automatiquement, vous n'avez
-              rien à faire ici.
-            </p>
-          </div>
-        )}
-
-        {/* Petite confirmation, en plus de la ligne déjà présente dans le fil */}
-        {visageVientDetreConfirme && (
-          <div className="carte-badge" style={{ borderColor: "var(--green)" }}>
-            <p className="sous-texte" style={{ marginTop: 0, marginBottom: 0, color: "var(--green)" }}>
-              ✓ Votre visage a bien été enregistré.
-            </p>
-          </div>
-        )}
-      </div>
-
-      {/* Barre d'action contextuelle, en fonction de l'étape en cours */}
-      {!parcoursTermine && (
-        <div className="barre-action">
-          {posteVientDetreAttribue && !candidat.dansEntreprise && (
-            <button className="bouton bouton-primaire bouton-bloc" disabled={actionEnCours} onClick={() => badge("entree")}>
-              Entrer dans l'entreprise
-            </button>
-          )}
-
-          {candidat.dansEntreprise && (
-            <button className="bouton bouton-primaire bouton-bloc" disabled={actionEnCours} onClick={() => badge("sortie")}>
-              Sortir
-            </button>
-          )}
-
-          {!candidat.dansEntreprise &&
-            candidat.poste &&
-            !posteVientDetreAttribue &&
-            (dernier?.type === "sortie" || dernier?.type === "jour_simulation") && (
-              <button className="bouton bouton-fantome bouton-bloc" disabled={actionEnCours} onClick={jourSuivant}>
-                Journée suivante
-              </button>
-            )}
+      <div className="ecran-contenu" style={{ gap: 24, paddingTop: 32 }}>
+        <div>
+          <p className="sous-texte" style={{ marginBottom: 4 }}>
+            Statut
+          </p>
+          <h1 className="grand-titre" style={{ fontSize: "1.6rem" }}>
+            {LIBELLES_STATUT[statut] || statut}
+          </h1>
         </div>
-      )}
+
+        {statut === "attente" && (
+          <div className="carte-badge">
+            <p className="sous-texte" style={{ margin: 0, color: "var(--text)" }}>
+              Votre candidature est en file d&apos;attente.
+            </p>
+            <p className="sous-texte" style={{ marginTop: 8, marginBottom: 0 }}>
+              Un responsable va bientôt vous appeler. Gardez cet écran ouvert :
+              il se mettra à jour automatiquement.
+            </p>
+          </div>
+        )}
+
+        {statut === "actif" && !poste && (
+          <div className="carte-badge">
+            <p
+              className="sous-texte"
+              style={{ marginTop: 0, marginBottom: 4, color: "var(--green)" }}
+            >
+              Vous avez été sélectionné !
+            </p>
+            <p className="sous-texte" style={{ marginTop: 0, marginBottom: 0 }}>
+              Rendez-vous devant l&apos;écran affiché en face de vous. Placez-vous
+              dans le cadre quand il affiche « Veuillez enregistrer votre visage
+              » : la photo est prise automatiquement.
+            </p>
+          </div>
+        )}
+
+        {statut === "actif" && poste && (
+          <div className="carte-badge" style={{ borderColor: "var(--green)" }}>
+            <p
+              className="sous-texte"
+              style={{ marginTop: 0, marginBottom: 4, color: "var(--green)" }}
+            >
+              Poste attribué : {poste.label}
+            </p>
+            <p className="sous-texte" style={{ marginTop: 0, marginBottom: 0 }}>
+              {poste.message}
+            </p>
+            <p className="sous-texte" style={{ marginTop: 12, marginBottom: 0 }}>
+              Présentez-vous au kiosque (carte + visage) pour entrer dans
+              l&apos;entreprise. La suite se joue sur place.
+            </p>
+          </div>
+        )}
+
+        {statut === "historique" && (
+          <div className="carte-badge" style={{ borderColor: "var(--red)" }}>
+            <p
+              className="sous-texte"
+              style={{ marginTop: 0, marginBottom: 0, color: "var(--text)" }}
+            >
+              {poste
+                ? `Parcours terminé. Dernier poste : ${poste.label}.`
+                : "Votre parcours est terminé (candidature non retenue ou fin de simulation)."}
+            </p>
+          </div>
+        )}
+
+        <p className="sous-texte" style={{ fontSize: 12, marginTop: "auto" }}>
+          Identifiant : <span className="code-mono">#{idCourt}</span> — notez-le
+          pour reprendre plus tard.
+        </p>
+      </div>
     </div>
   );
 }
