@@ -1,0 +1,40 @@
+/*
+  Direction : "terminal de badgeuse d'entreprise".
+  Le téléphone du visiteur se comporte comme l'écran d'un lecteur de badge :
+  fond quasi noir, statut encodé par une LED de couleur, texte technique en
+  monospace pour tout ce qui ressemble à une donnée système (heures, ids,
+  codes de statut), et un display en Space Grotesk pour les annonces.
+  Le parcours (TimelineFeed) reprend le motif d'un ticket de badgeuse
+  perforé, empilé verticalement.
+*/
+:root {
+  /* Fond */
+  --bg: #0d1117;
+  --bg-panel: #141b26;
+  --bg-panel-raised: #1a2333;
+  --border: #26314424;
+  --border-solid: #263144;
+
+  /* Texte */
+  --text: #eef1f6;
+  --text-dim: #8b96ab;
+  --text-faint: #59647a;
+
+  /* Statuts (LED de la badgeuse) */
+  --amber: #ffb020;
+  --amber-dim: #ffb02022;
+  --green: #37d18c;
+  --green-dim: #37d18c22;
+  --red: #ff5d5d;
+  --red-dim: #ff5d5d22;
+  --blue: #4c7cff;
+  --blue-dim: #4c7cff22;
+
+  /* Typo */
+  --font-display: "Space Grotesk", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --font-body: "Inter", system-ui, sans-serif;
+
+  --radius: 14px;
+  --radius-sm: 8px;
+}

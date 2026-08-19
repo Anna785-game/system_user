@@ -1,0 +1,242 @@
+@import "./tokens.css";
+
+* { box-sizing: border-box; }
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+}
+
+button {
+  font-family: inherit;
+}
+
+::selection {
+  background: var(--blue-dim);
+}
+
+/* --------------------------------------------------------------------- */
+/* Coque "téléphone" : toute la maquette vit dans une colonne max-width,  */
+/* pour rester cohérente même testée sur un grand écran de dev.          */
+/* --------------------------------------------------------------------- */
+.ecran {
+  min-height: 100dvh;
+  max-width: 480px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  background:
+    radial-gradient(80% 60% at 50% 0%, #17202e 0%, var(--bg) 70%);
+}
+
+.ecran-contenu {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 28px 22px 34px;
+}
+
+/* En-tête commun : petit texte technique en haut, façon "PORT 01" d'une
+   badgeuse, pour ancrer l'univers dès la première seconde. */
+.entete-systeme {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--text-faint);
+  text-transform: uppercase;
+  padding: 16px 22px 0;
+}
+
+.led {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  margin-right: 6px;
+  box-shadow: 0 0 8px currentColor;
+}
+.led.amber { background: var(--amber); color: var(--amber); }
+.led.green { background: var(--green); color: var(--green); }
+.led.red   { background: var(--red);   color: var(--red); }
+.led.blue  { background: var(--blue);  color: var(--blue); }
+
+/* --------------------------------------------------------------------- */
+/* Typo d'annonce : le "grand message centré" demandé pour chaque étape. */
+/* --------------------------------------------------------------------- */
+.grand-titre {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: clamp(26px, 8vw, 36px);
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+  margin: 0;
+}
+
+.sous-texte {
+  font-family: var(--font-body);
+  color: var(--text-dim);
+  font-size: 15px;
+  line-height: 1.5;
+  margin-top: 12px;
+}
+
+.code-mono {
+  font-family: var(--font-mono);
+  letter-spacing: 0.04em;
+}
+
+/* --------------------------------------------------------------------- */
+/* Boutons                                                                */
+/* --------------------------------------------------------------------- */
+.bouton {
+  appearance: none;
+  border: none;
+  border-radius: 999px;
+  padding: 15px 26px;
+  font-size: 15px;
+  font-weight: 600;
+  font-family: var(--font-body);
+  cursor: pointer;
+  transition: transform 0.15s ease, opacity 0.15s ease;
+}
+.bouton:active { transform: scale(0.97); }
+.bouton:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.bouton-primaire {
+  background: var(--text);
+  color: #0b0f14;
+}
+.bouton-fantome {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border-solid);
+}
+.bouton-bloc { width: 100%; text-align: center; }
+
+/* --------------------------------------------------------------------- */
+/* Champs de formulaire                                                  */
+/* --------------------------------------------------------------------- */
+.champ {
+  width: 100%;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-solid);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 15px;
+  padding: 14px 16px;
+  font-family: var(--font-body);
+}
+.champ:focus {
+  outline: none;
+  border-color: var(--blue);
+}
+.champ::placeholder { color: var(--text-faint); }
+
+.groupe-champ { display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; }
+.groupe-champ label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.erreur-form {
+  color: var(--red);
+  font-size: 13px;
+  margin-top: -6px;
+  margin-bottom: 14px;
+  font-family: var(--font-mono);
+}
+
+/* --------------------------------------------------------------------- */
+/* Feed / timeline perforée du parcours                                  */
+/* --------------------------------------------------------------------- */
+.feed {
+  flex: 1;
+  overflow-y: auto;
+  padding: 18px 20px 90px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.feed-item {
+  position: relative;
+  padding: 16px 4px 20px 26px;
+  border-left: 2px dashed var(--border-solid);
+}
+.feed-item:last-child { border-left: 2px dashed transparent; }
+
+.feed-item::before {
+  content: "";
+  position: absolute;
+  left: -6px;
+  top: 18px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--bg);
+  border: 2px solid var(--text-faint);
+}
+.feed-item.majeur::before {
+  border-color: var(--tone, var(--blue));
+  box-shadow: 0 0 0 4px var(--tone-dim, var(--blue-dim));
+}
+
+.feed-item .horodatage {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-faint);
+  margin-bottom: 6px;
+  letter-spacing: 0.04em;
+}
+
+.feed-item .libelle {
+  font-family: var(--font-body);
+  font-size: 14px;
+  color: var(--text-dim);
+}
+
+.feed-item.majeur .libelle {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 19px;
+  color: var(--text);
+}
+
+.feed-item.actuel {
+  animation: apparition 0.4s ease;
+}
+@keyframes apparition {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Carte "poste attribué" mise en avant, look badge/carte plastifiée */
+.carte-badge {
+  margin-top: 10px;
+  border-radius: var(--radius);
+  padding: 18px;
+  background: var(--bg-panel-raised);
+  border: 1px solid var(--border-solid);
+}
+
+/* Barre d'action fixe en bas d'écran, pour les CTA du parcours */
+.barre-action {
+  position: sticky;
+  bottom: 0;
+  padding: 16px 20px calc(16px + env(safe-area-inset-bottom));
+  background: linear-gradient(180deg, transparent, var(--bg) 30%);
+}
