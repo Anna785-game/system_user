@@ -110,6 +110,32 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ candidat_id: Number(candidatId), password }),
     }),
+
+  /**
+   * Demande d'enrôlement sur l'écran kiosque (quand la caméra du téléphone
+   * est bloquée / indisponible). Déclenche l'événement WS
+   * `enrolement_ecran_demande` côté backend.
+   */
+  demanderEnrolementEcran: (candidatId) => {
+    const form = new FormData();
+    form.append("candidat_id", String(candidatId));
+    return fetch(`${API_BASE}/api/biometrie/demander-enrolement-ecran`, {
+      method: "POST",
+      body: form,
+    }).then(async (res) => {
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        const erreur = new Error(
+          (typeof data?.detail === "string" ? data.detail : null) ||
+            data?.erreur ||
+            `Erreur ${res.status}`
+        );
+        erreur.status = res.status;
+        throw erreur;
+      }
+      return data;
+    });
+  },
 };
 
 export { API_BASE };
