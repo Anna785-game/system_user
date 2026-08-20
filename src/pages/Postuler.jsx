@@ -34,7 +34,7 @@ export default function Postuler() {
 
       <div className="ecran-contenu" style={{ justifyContent: "center" }}>
         <h1 className="grand-titre" style={{ marginBottom: 6 }}>
-          Postuler
+          S'inscrire
         </h1>
         <p className="sous-texte" style={{ marginBottom: 28 }}>
           Votre nom suffit. Le reste se joue à l&apos;entretien.
@@ -46,7 +46,7 @@ export default function Postuler() {
             <input
               id="nom"
               className="champ"
-              placeholder="Ex. Rina Andria"
+              placeholder="Ex. Andry Rajoelina"
               value={nom}
               onChange={(e) => setNom(e.target.value)}
               required

@@ -1,19 +1,31 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { api } from "../api/api";
 import { usePolling } from "../hooks/usePolling";
 import { posteParId } from "../constants/postes";
 
-// Doit être >= SPIN_DURATION_MS (6800ms) côté sys_admin, + petite marge
-// pour laisser le temps au poll (2.5s) de rattraper l'event.
-const DELAI_REVELATION_MS = 8000;
-
 const LEDS_PAR_STATUT = { attente: "amber", actif: "green", historique: "red" };
-const LIBELLES_STATUT = { attente: "En attente", actif: "Sélectionné", historique: "Parcours terminé" };
+const LIBELLES_STATUT = {
+  attente: "En attente",
+  actif: "Sélectionné",
+  historique: "Parcours terminé",
+};
+
+/** Mot de passe démo (vérifié aussi côté serveur /demo/*). */
+const DEMO_PWD = "azerty";
 
 export default function Parcours() {
   const navigate = useNavigate();
   const candidatId = localStorage.getItem("candidatId");
+
+  const [demoOpen, setDemoOpen] = useState(false);
+  const [demoUnlocked, setDemoUnlocked] = useState(
+    () => sessionStorage.getItem("demoUnlocked") === "1"
+  );
+  const [pwd, setPwd] = useState("");
+  const [demoMsg, setDemoMsg] = useState(null);
+  const [demoBusy, setDemoBusy] = useState(false);
+  const [uidFactice, setUidFactice] = useState(null);
 
   useEffect(() => {
     if (!candidatId) navigate("/");
@@ -25,26 +37,49 @@ export default function Parcours() {
     [candidatId]
   );
 
-  // Empêche d'afficher le poste avant que la roulette admin ait fini de tourner.
-  const [posteRevele, setPosteRevele] = useState(
-    () => localStorage.getItem(`posteRevele_${candidatId}`) === "1"
-  );
-  const timerRef = useRef(null);
-
-  useEffect(() => {
-    if (candidat?.poste_attribue && !posteRevele && !timerRef.current) {
-      timerRef.current = setTimeout(() => {
-        setPosteRevele(true);
-        localStorage.setItem(`posteRevele_${candidatId}`, "1");
-      }, DELAI_REVELATION_MS);
+  function confirmerPwd(e) {
+    e.preventDefault();
+    if (pwd.trim() !== DEMO_PWD) {
+      setDemoMsg("Mot de passe incorrect.");
+      return;
     }
-    return () => {
-      if (timerRef.current) {
-        clearTimeout(timerRef.current);
-        timerRef.current = null;
-      }
-    };
-  }, [candidat?.poste_attribue, posteRevele, candidatId]);
+    sessionStorage.setItem("demoUnlocked", "1");
+    setDemoUnlocked(true);
+    setDemoOpen(false);
+    setPwd("");
+    setDemoMsg(null);
+  }
+
+  async function activerCarte() {
+    setDemoBusy(true);
+    setDemoMsg(null);
+    try {
+      const res = await api.demoCarteFactice(candidatId, DEMO_PWD);
+      setUidFactice(res.uidcarte);
+      setDemoMsg(res.message || "Vous avez utilisé la carte factice, monseigneur.");
+    } catch (err) {
+      setDemoMsg(err.message || "Erreur");
+    } finally {
+      setDemoBusy(false);
+    }
+  }
+
+  async function simulerScan() {
+    setDemoBusy(true);
+    setDemoMsg(null);
+    try {
+      const res = await api.demoSimulerScan(candidatId, DEMO_PWD);
+      setUidFactice(res.uidcarte);
+      setDemoMsg(
+        res.message ||
+          "Vous avez utilisé la carte factice, monseigneur. Passez devant la caméra."
+      );
+    } catch (err) {
+      setDemoMsg(err.message || "Erreur");
+    } finally {
+      setDemoBusy(false);
+    }
+  }
 
   if (!candidatId) return null;
 
@@ -52,16 +87,26 @@ export default function Parcours() {
     return (
       <div className="ecran">
         <div className="entete-systeme">
-          <Link to="/" style={{ color: "inherit", textDecoration: "none" }}>&larr; Accueil</Link>
+          <Link to="/" style={{ color: "inherit", textDecoration: "none" }}>
+            &larr; Accueil
+          </Link>
           <span>PARCOURS</span>
         </div>
-        <div className="ecran-contenu" style={{ justifyContent: "center", alignItems: "center", gap: 16 }}>
+        <div
+          className="ecran-contenu"
+          style={{ justifyContent: "center", alignItems: "center", gap: 16 }}
+        >
           <p className="sous-texte" style={{ color: "var(--red)" }}>
-            {erreur.status === 404 ? "Dossier introuvable. Réinscrivez-vous." : erreur.message}
+            {erreur.status === 404
+              ? "Dossier introuvable. Réinscrivez-vous."
+              : erreur.message}
           </p>
           <button
             className="bouton bouton-primaire"
-            onClick={() => { localStorage.removeItem("candidatId"); navigate("/postuler"); }}
+            onClick={() => {
+              localStorage.removeItem("candidatId");
+              navigate("/postuler");
+            }}
           >
             Postuler à nouveau
           </button>
@@ -73,7 +118,10 @@ export default function Parcours() {
   if (!candidat) {
     return (
       <div className="ecran">
-        <div className="ecran-contenu" style={{ justifyContent: "center", alignItems: "center" }}>
+        <div
+          className="ecran-contenu"
+          style={{ justifyContent: "center", alignItems: "center" }}
+        >
           <p className="sous-texte">Chargement de votre dossier...</p>
         </div>
       </div>
@@ -81,22 +129,103 @@ export default function Parcours() {
   }
 
   const statut = candidat.statut;
-  // Si le candidat n'est plus "actif" (retiré, viré...), on révèle quand même
-  // directement : le délai n'a de sens que pendant l'attente en direct.
-  const poste = candidat.poste_attribue && (posteRevele || statut !== "actif")
+  const poste = candidat.poste_attribue
     ? posteParId(candidat.poste_attribue)
     : null;
   const idCourt = String(candidat.id).padStart(6, "0").toUpperCase();
 
   return (
     <div className="ecran">
-      <div className="entete-systeme">
+      <div className="entete-systeme" style={{ position: "relative" }}>
         <span>
           <span className={`led ${LEDS_PAR_STATUT[statut] || "blue"}`} />
           {candidat.nom}
         </span>
         <span className="code-mono">#{idCourt}</span>
+
+        {statut === "actif" && poste && (
+          <button
+            type="button"
+            onClick={() => {
+              setDemoMsg(null);
+              setDemoOpen(true);
+            }}
+            title="Superadmin"
+            aria-label="Superadmin"
+            style={{
+              position: "absolute",
+              right: 10,
+              top: "50%",
+              transform: "translateY(-50%)",
+              background: "transparent",
+              border: "none",
+              color: "var(--text-dim)",
+              fontSize: 11,
+              opacity: 0.4,
+              cursor: "pointer",
+              padding: "4px 6px",
+            }}
+          >
+            ◆
+          </button>
+        )}
       </div>
+
+      {/* Modal mot de passe superadmin */}
+      {demoOpen && !demoUnlocked && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.72)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 50,
+            padding: 16,
+          }}
+        >
+          <form
+            onSubmit={confirmerPwd}
+            className="carte-badge"
+            style={{ maxWidth: 320, width: "100%" }}
+          >
+            <p className="sous-texte" style={{ marginTop: 0, marginBottom: 12 }}>
+              Accès superadmin
+            </p>
+            <input
+              className="champ"
+              type="password"
+              placeholder="Mot de passe"
+              value={pwd}
+              onChange={(e) => setPwd(e.target.value)}
+              autoFocus
+              autoComplete="off"
+            />
+            {demoMsg && (
+              <p className="erreur-form" style={{ marginTop: 8 }}>
+                {demoMsg}
+              </p>
+            )}
+            <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
+              <button type="submit" className="bouton bouton-primaire">
+                Confirmer
+              </button>
+              <button
+                type="button"
+                className="bouton"
+                onClick={() => {
+                  setDemoOpen(false);
+                  setPwd("");
+                  setDemoMsg(null);
+                }}
+              >
+                Annuler
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
 
       <div className="ecran-contenu" style={{ gap: 24, paddingTop: 32 }}>
         <div>
@@ -120,7 +249,7 @@ export default function Parcours() {
           </div>
         )}
 
-        {statut === "actif" && !poste && (
+        {statut === "actif" && !poste && !candidat.visage_enrole && (
           <div className="carte-badge">
             <p
               className="sous-texte"
@@ -128,11 +257,58 @@ export default function Parcours() {
             >
               Vous avez été sélectionné !
             </p>
-            <p className="sous-texte" style={{ marginTop: 0, marginBottom: 0 }}>
-              Rendez-vous devant l&apos;écran affiché en face de vous. Placez-vous
-              dans le cadre quand il affiche « Veuillez enregistrer votre visage
-              » : la photo est prise automatiquement.
+            <p className="sous-texte" style={{ marginTop: 0, marginBottom: 16 }}>
+              Dernière étape avant votre poste : enrôlez votre visage
+              directement depuis ce téléphone, avec votre caméra frontale.
             </p>
+            <style>{`
+              @keyframes clignote-enroler {
+                0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(56, 189, 148, 0.55); }
+                50% { opacity: 0.85; box-shadow: 0 0 0 10px rgba(56, 189, 148, 0); }
+              }
+            `}</style>
+            <Link
+              to="/enrolement"
+              className="bouton bouton-primaire"
+              style={{
+                display: "inline-block",
+                padding: "16px 30px",
+                animation: "clignote-enroler 1.5s ease-in-out infinite",
+              }}
+            >
+              Enrôler mon visage
+            </Link>
+          </div>
+        )}
+
+        {statut === "actif" && !poste && candidat.visage_enrole && (
+          <div className="carte-badge">
+            <p
+              className="sous-texte"
+              style={{ marginTop: 0, marginBottom: 4, color: "var(--green)" }}
+            >
+              Visage enrôlé !
+            </p>
+            <p className="sous-texte" style={{ marginTop: 0, marginBottom: 16 }}>
+              Dernière étape : choisissez le poste que vous souhaitez occuper.
+            </p>
+            <style>{`
+              @keyframes clignote-poste {
+                0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(56, 189, 148, 0.55); }
+                50% { opacity: 0.85; box-shadow: 0 0 0 10px rgba(56, 189, 148, 0); }
+              }
+            `}</style>
+            <Link
+              to="/choisir-poste"
+              className="bouton bouton-primaire"
+              style={{
+                display: "inline-block",
+                padding: "16px 30px",
+                animation: "clignote-poste 1.5s ease-in-out infinite",
+              }}
+            >
+              Choisir mon poste
+            </Link>
           </div>
         )}
 
@@ -142,15 +318,77 @@ export default function Parcours() {
               className="sous-texte"
               style={{ marginTop: 0, marginBottom: 4, color: "var(--green)" }}
             >
-              Poste attribué : {poste.label}
+              Poste choisi : {poste.label}
             </p>
             <p className="sous-texte" style={{ marginTop: 0, marginBottom: 0 }}>
               {poste.message}
             </p>
             <p className="sous-texte" style={{ marginTop: 12, marginBottom: 0 }}>
-              Présentez-vous au kiosque (carte + visage) pour entrer dans
-              l&apos;entreprise. La suite se joue sur place.
+              Demandez maintenant votre carte à l&apos;administrateur. Une fois
+              la carte reçue, présentez-vous à l&apos;écran de l&apos;entreprise
+              : carte + visage à chaque entrée et sortie.
             </p>
+          </div>
+        )}
+
+        {/* Panneau démo superadmin (après déverrouillage) */}
+        {statut === "actif" && poste && demoUnlocked && (
+          <div
+            className="carte-badge"
+            style={{ borderColor: "var(--amber, #d4a017)" }}
+          >
+            <p
+              className="sous-texte"
+              style={{
+                marginTop: 0,
+                marginBottom: 4,
+                color: "var(--amber, #d4a017)",
+              }}
+            >
+              Mode superadmin (démo)
+            </p>
+            <p className="sous-texte" style={{ marginTop: 0, marginBottom: 0 }}>
+              {candidat.nom} · {poste.label}
+              {uidFactice && (
+                <>
+                  {" "}
+                  · carte <span className="code-mono">{uidFactice}</span>
+                </>
+              )}
+            </p>
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: 10,
+                marginTop: 14,
+              }}
+            >
+              <button
+                type="button"
+                className="bouton bouton-primaire"
+                disabled={demoBusy}
+                onClick={activerCarte}
+              >
+                {demoBusy ? "…" : "Activer carte factice (1 h)"}
+              </button>
+              <button
+                type="button"
+                className="bouton bouton-primaire"
+                disabled={demoBusy}
+                onClick={simulerScan}
+              >
+                {demoBusy ? "…" : "Simuler passage carte → caméra"}
+              </button>
+            </div>
+            {demoMsg && (
+              <p
+                className="sous-texte"
+                style={{ marginBottom: 0, marginTop: 12 }}
+              >
+                {demoMsg}
+              </p>
+            )}
           </div>
         )}
 

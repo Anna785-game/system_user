@@ -1,20 +1,22 @@
-// Synchronisé avec /postes/seed-demo du backend
+// Synchronisé avec /postes/seed-demo du backend. Les postes sont désormais
+// choisis par le candidat lui-même (voir pages/ChoisirPoste.jsx) : ce
+// mapping ne sert plus qu'à personnaliser le libellé et le message affichés
+// une fois le poste choisi, il n'y a plus de tirage au sort.
 export const POSTES = {
   Boss: {
     label: "Grand Patron",
     ton: "succes",
-    message: "Bien joué : avec votre CV, vous êtes devenu le boss.",
+    message: "Vous avez choisi de prendre les commandes, en tant que boss.",
   },
   Vendeur: {
     label: "Vendeur",
     ton: "neutre",
-    message: "Vous avez le contact facile. Direction le terrain, en vendeur.",
+    message: "Vous avez choisi le terrain : direction la vente.",
   },
   "Nettoyeur de toilettes": {
     label: "Nettoyeur de toilettes",
-    ton: "echec",
-    message:
-      "Malheureusement, le grand patron vous a mis comme nettoyeur de toilettes.",
+    ton: "neutre",
+    message: "Vous avez choisi ce poste. Respect.",
   },
 };
 
@@ -23,7 +25,7 @@ export function posteParId(id) {
     POSTES[id] || {
       label: id || "Poste",
       ton: "neutre",
-      message: "Poste attribué.",
+      message: "Poste choisi.",
     }
   );
 }

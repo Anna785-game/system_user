@@ -1,0 +1,1644 @@
+PROJECT DUMP
+================================================================================
+Projet : systeme_presence_user
+Généré le : 2026-08-20 15:50:41
+Fichiers inclus : 15
+================================================================================
+
+ARBORESCENCE
+--------------------------------------------------------------------------------
+systeme_presence_user/
+├── public/
+│   ├── favicon.svg
+│   └── icons.svg
+├── src/
+│   ├── api/
+│   │   └── api.js
+│   ├── assets/
+│   │   ├── hero.png
+│   │   ├── react.svg
+│   │   └── vite.svg
+│   ├── components/
+│   │   └── TimelineItem.jsx
+│   ├── constants/
+│   │   ├── events.js
+│   │   └── postes.js
+│   ├── hooks/
+│   │   ├── useCameraVisage.js
+│   │   └── usePolling.js
+│   ├── pages/
+│   │   ├── ChoisirPoste.jsx
+│   │   ├── Connexion.jsx
+│   │   ├── Enrolement.jsx
+│   │   ├── Home.jsx
+│   │   ├── Parcours.jsx
+│   │   └── Postuler.jsx
+│   ├── styles/
+│   │   ├── global.css
+│   │   └── tokens.css
+│   ├── App.css
+│   ├── App.jsx
+│   ├── index.css
+│   └── main.jsx
+├── .oxlintrc.json
+├── index.html
+├── v.txt
+├── v4.txt
+├── vercel.json
+└── vite.config.js
+
+CONTENU DES FICHIERS
+================================================================================
+
+# src/api/api.js
+--------------------------------------------------------------------------------
+const API_BASE = import.meta.env.VITE_API_BASE;
+
+async function appel(url, options = {}) {
+  const res = await fetch(url, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...(options.headers || {}),
+    },
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) {
+    const erreur = new Error(
+      (typeof data?.detail === "string" ? data.detail : null) ||
+        data?.erreur ||
+        `Erreur ${res.status}`
+    );
+    erreur.status = res.status;
+    erreur.data = data;
+    throw erreur;
+  }
+  return data;
+}
+
+/**
+ * Client aligné sur fastapi_pointage.
+ *
+ * Inscription publique : POST /candidats/inscription { nom }
+ * Suivi : GET /candidats/mon-statut?candidat_id=
+ * Enrôlement biométrique : POST /api/biometrie/enroll-public (caméra
+ * frontale du téléphone — voir pages/Enrolement.jsx).
+ * Choix du poste : GET /candidats/postes-disponibles puis
+ * POST /candidats/{id}/choisir-poste (voir pages/ChoisirPoste.jsx). C'est
+ * désormais le candidat qui choisit lui-même son poste, il n'y a plus de
+ * tirage au sort côté serveur.
+ *
+ * Badge (entrée/sortie) et attribution de la carte physique restent gérés
+ * au kiosque (sys_ecran), pas sur le téléphone.
+ *
+ * Mode démo : POST /demo/carte-factice et /demo/simuler-scan (mdp azerty).
+ */
+export const api = {
+  /** Crée (ou renvoie l'existant en attente/actif) un candidat. */
+  postuler: (nom) =>
+    appel(`${API_BASE}/candidats/inscription`, {
+      method: "POST",
+      body: JSON.stringify({ nom }),
+    }),
+
+  /**
+   * "Connexion" par id déjà connu (stocké en localStorage à l'inscription).
+   * Pas de lookup par email côté API publique.
+   */
+  recupererCandidat: (id) =>
+    appel(
+      `${API_BASE}/candidats/mon-statut?candidat_id=${encodeURIComponent(id)}`
+    ),
+
+  /**
+   * Envoie la photo prise par la caméra frontale du téléphone.
+   * POST /api/biometrie/enroll-public (multipart), pas de header
+   * "Content-Type" manuel : le navigateur pose la bonne boundary pour le
+   * FormData (appel() ne doit donc PAS forcer application/json ici).
+   */
+  enrolerVisage: async (candidatId, blobPhoto) => {
+    const form = new FormData();
+    form.append("candidat_id", String(candidatId));
+    form.append("photo", blobPhoto, "photo.jpg");
+
+    const res = await fetch(`${API_BASE}/api/biometrie/enroll-public`, {
+      method: "POST",
+      body: form,
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) {
+      const erreur = new Error(
+        (typeof data?.detail === "string" ? data.detail : null) ||
+          data?.erreur ||
+          `Erreur ${res.status}`
+      );
+      erreur.status = res.status;
+      throw erreur;
+    }
+    return data; // { success, employe_id, ... }
+  },
+
+  /** Liste publique des postes proposés au choix (voir ChoisirPoste.jsx). */
+  listePostesDisponibles: () =>
+    appel(`${API_BASE}/candidats/postes-disponibles`),
+
+  /** Le candidat choisit lui-même son poste parmi la liste ci-dessus. */
+  choisirPoste: (candidatId, posteId) =>
+    appel(
+      `${API_BASE}/candidats/${encodeURIComponent(candidatId)}/choisir-poste`,
+      {
+        method: "POST",
+        body: JSON.stringify({ poste_id: posteId }),
+      }
+    ),
+
+  /** Mode démo superadmin (mot de passe azerty côté serveur). */
+  demoCarteFactice: (candidatId, password) =>
+    appel(`${API_BASE}/demo/carte-factice`, {
+      method: "POST",
+      body: JSON.stringify({ candidat_id: Number(candidatId), password }),
+    }),
+
+  demoSimulerScan: (candidatId, password) =>
+    appel(`${API_BASE}/demo/simuler-scan`, {
+      method: "POST",
+      body: JSON.stringify({ candidat_id: Number(candidatId), password }),
+    }),
+};
+
+export { API_BASE };
+
+================================================================================
+
+# src/App.jsx
+--------------------------------------------------------------------------------
+import { BrowserRouter, Routes, Route } from "react-router-dom";
+import Home from "./pages/Home";
+import Postuler from "./pages/Postuler";
+import Connexion from "./pages/Connexion";
+import Parcours from "./pages/Parcours";
+import Enrolement from "./pages/Enrolement";
+import ChoisirPoste from "./pages/ChoisirPoste";
+
+export default function App() {
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<Home />} />
+        <Route path="/postuler" element={<Postuler />} />
+        <Route path="/connexion" element={<Connexion />} />
+        <Route path="/parcours" element={<Parcours />} />
+        <Route path="/enrolement" element={<Enrolement />} />
+        <Route path="/choisir-poste" element={<ChoisirPoste />} />
+      </Routes>
+    </BrowserRouter>
+  );
+}
+
+================================================================================
+
+# src/components/TimelineItem.jsx
+--------------------------------------------------------------------------------
+import { configEvenement } from "../constants/events";
+
+const COULEURS = {
+  amber: ["var(--amber)", "var(--amber-dim)"],
+  green: ["var(--green)", "var(--green-dim)"],
+  red: ["var(--red)", "var(--red-dim)"],
+  blue: ["var(--blue)", "var(--blue-dim)"],
+};
+
+function formatHeure(iso) {
+  return new Date(iso).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+}
+
+export default function TimelineItem({ evenement, estLeDernier }) {
+  const config = configEvenement(evenement.type);
+  const ton = typeof config.ton === "function" ? config.ton(evenement.data) : config.ton;
+  const [couleur, couleurDim] = COULEURS[ton] || COULEURS.blue;
+
+  return (
+    <div
+      className={`feed-item ${config.majeur ? "majeur" : ""} ${estLeDernier ? "actuel" : ""}`}
+      style={{ "--tone": couleur, "--tone-dim": couleurDim }}
+    >
+      <div className="horodatage">{formatHeure(evenement.ts)}</div>
+      <div className="libelle">{config.libelle(evenement.data)}</div>
+    </div>
+  );
+}
+
+================================================================================
+
+# src/constants/events.js
+--------------------------------------------------------------------------------
+import { posteParId } from "./postes";
+
+// majeur: true => rendu en "grand texte" dans le feed (les moments clés du
+// parcours). false => ligne discrète (utile pour garder le fil sans saturer
+// l'écran).
+export const CONFIG_EVENEMENTS = {
+  candidature: {
+    majeur: false,
+    ton: "blue",
+    libelle: () => "Candidature envoyée.",
+  },
+  en_attente: {
+    majeur: true,
+    ton: "amber",
+    libelle: () => "Vous êtes en attente.",
+  },
+  selection: {
+    majeur: true,
+    ton: "green",
+    libelle: () => "Vous avez été sélectionné !",
+  },
+  refus: {
+    majeur: true,
+    ton: "red",
+    libelle: () => "Candidature non retenue cette fois.",
+  },
+  action_enregistrer_visage: {
+    majeur: true,
+    ton: "blue",
+    libelle: () => "Enregistrez votre visage d'abord.",
+  },
+  visage_ok: {
+    majeur: false,
+    ton: "green",
+    libelle: () => "Visage enregistré.",
+  },
+  poste_attribue: {
+    majeur: true,
+    ton: (d) => (posteParId(d.poste).ton === "succes" ? "green" : posteParId(d.poste).ton === "echec" ? "red" : "blue"),
+    libelle: (d) => posteParId(d.poste).message,
+  },
+  entree: {
+    majeur: true,
+    ton: "green",
+    libelle: (d) => `Vous êtes entré à ${d.heure}.`,
+  },
+  sortie: {
+    majeur: true,
+    ton: "amber",
+    libelle: (d) => `Vous êtes sorti à ${d.heure}.`,
+  },
+  jour_simulation: {
+    majeur: true,
+    ton: "blue",
+    libelle: (d) => `Jour ${d.jour} : ${d.anecdote}`,
+  },
+  licenciement: {
+    majeur: true,
+    ton: "red",
+    libelle: () => "Vous êtes viré.",
+  },
+};
+
+export function configEvenement(type) {
+  return CONFIG_EVENEMENTS[type] || { majeur: false, ton: "blue", libelle: () => type };
+}
+
+================================================================================
+
+# src/constants/postes.js
+--------------------------------------------------------------------------------
+// Synchronisé avec /postes/seed-demo du backend. Les postes sont désormais
+// choisis par le candidat lui-même (voir pages/ChoisirPoste.jsx) : ce
+// mapping ne sert plus qu'à personnaliser le libellé et le message affichés
+// une fois le poste choisi, il n'y a plus de tirage au sort.
+export const POSTES = {
+  Boss: {
+    label: "Grand Patron",
+    ton: "succes",
+    message: "Vous avez choisi de prendre les commandes, en tant que boss.",
+  },
+  Vendeur: {
+    label: "Vendeur",
+    ton: "neutre",
+    message: "Vous avez choisi le terrain : direction la vente.",
+  },
+  "Nettoyeur de toilettes": {
+    label: "Nettoyeur de toilettes",
+    ton: "neutre",
+    message: "Vous avez choisi ce poste. Respect.",
+  },
+};
+
+export function posteParId(id) {
+  return (
+    POSTES[id] || {
+      label: id || "Poste",
+      ton: "neutre",
+      message: "Poste choisi.",
+    }
+  );
+}
+
+================================================================================
+
+# src/hooks/useCameraVisage.js
+--------------------------------------------------------------------------------
+import { useEffect, useRef, useState } from "react";
+
+// Ouvre la caméra FRONTALE du téléphone (facingMode "user") tant que
+// `actif` est vrai. Contrairement au hook équivalent de sys_ecran (qui
+// tourne sur un PC/tablette fixe avec une détection de présence en
+// continu), on ne fait pas de détection automatique de visage ici : sur
+// mobile, l'API FaceDetector est peu fiable/absente (Safari iOS), et une
+// simple confirmation manuelle de l'utilisateur ("Je suis prêt") avant de
+// lancer le compte à rebours est plus robuste.
+export function useCameraVisage(actif) {
+  const videoRef = useRef(null);
+  const [pret, setPret] = useState(false);
+  const [erreur, setErreur] = useState(null);
+
+  useEffect(() => {
+    if (!actif) {
+      setPret(false);
+      return;
+    }
+
+    let flux;
+    let annule = false;
+
+    async function demarrer() {
+      try {
+        flux = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "user" },
+          audio: false,
+        });
+        if (annule) {
+          flux.getTracks().forEach((t) => t.stop());
+          return;
+        }
+        if (videoRef.current) {
+          videoRef.current.srcObject = flux;
+          await videoRef.current.play();
+          setPret(true);
+        }
+      } catch {
+        setErreur(
+          "Impossible d'accéder à la caméra frontale. Vérifiez l'autorisation caméra de votre navigateur."
+        );
+      }
+    }
+    demarrer();
+
+    return () => {
+      annule = true;
+      flux?.getTracks().forEach((t) => t.stop());
+    };
+  }, [actif]);
+
+  function capturerPhoto() {
+    const video = videoRef.current;
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext("2d");
+    // Miroir horizontal : la vidéo est affichée en mode "selfie" (flip
+    // CSS), on capture donc l'image dans le même sens pour que la photo
+    // corresponde à ce que l'utilisateur a vu à l'écran.
+    ctx.translate(canvas.width, 0);
+    ctx.scale(-1, 1);
+    ctx.drawImage(video, 0, 0);
+    return new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.92));
+  }
+
+  return { videoRef, pret, erreur, capturerPhoto };
+}
+
+================================================================================
+
+# src/hooks/usePolling.js
+--------------------------------------------------------------------------------
+import { useEffect, useRef, useState } from "react";
+
+// Interroge `fn` toutes les `intervalleMs` et expose le dernier résultat.
+// Utilisé pour que l'écran candidat réagisse aux actions prises côté front
+// admin (sélection, licenciement, ...) sans que l'utilisateur ait à raffraîchir.
+export function usePolling(fn, intervalleMs = 3000, deps = []) {
+  const [donnees, setDonnees] = useState(null);
+  const [erreur, setErreur] = useState(null);
+  const enCours = useRef(false);
+
+  useEffect(() => {
+    let annule = false;
+
+    async function tick() {
+      if (enCours.current) return;
+      enCours.current = true;
+      try {
+        const resultat = await fn();
+        if (!annule) {
+          setDonnees(resultat);
+          setErreur(null);
+        }
+      } catch (e) {
+        if (!annule) setErreur(e);
+      } finally {
+        enCours.current = false;
+      }
+    }
+
+    tick();
+    const id = setInterval(tick, intervalleMs);
+    return () => {
+      annule = true;
+      clearInterval(id);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, deps);
+
+  return { donnees, erreur, setDonnees };
+}
+
+================================================================================
+
+# src/main.jsx
+--------------------------------------------------------------------------------
+import React from "react";
+import ReactDOM from "react-dom/client";
+import App from "./App";
+import "./styles/global.css";
+
+ReactDOM.createRoot(document.getElementById("root")).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);
+
+================================================================================
+
+# src/pages/ChoisirPoste.jsx
+--------------------------------------------------------------------------------
+import { useEffect, useState } from "react";
+import { useNavigate, Link } from "react-router-dom";
+import { api } from "../api/api";
+import { posteParId } from "../constants/postes";
+
+// phase : "chargement" | "choix" | "envoi"
+export default function ChoisirPoste() {
+  const navigate = useNavigate();
+  const candidatId = localStorage.getItem("candidatId");
+
+  const [phase, setPhase] = useState("chargement");
+  const [postes, setPostes] = useState([]);
+  const [posteChoisiId, setPosteChoisiId] = useState(null);
+  const [erreurChargement, setErreurChargement] = useState(null);
+  const [erreurEnvoi, setErreurEnvoi] = useState(null);
+
+  useEffect(() => {
+    if (!candidatId) {
+      navigate("/");
+      return;
+    }
+    let annule = false;
+    (async () => {
+      try {
+        const c = await api.recupererCandidat(candidatId);
+        if (annule) return;
+        if (c.statut !== "actif") {
+          navigate("/parcours");
+          return;
+        }
+        if (c.poste_attribue) {
+          // Poste déjà choisi (double-tap, retour arrière...) : rien à
+          // refaire ici.
+          navigate("/parcours");
+          return;
+        }
+        if (!c.visage_enrole) {
+          // Le visage doit être enrôlé avant de pouvoir choisir un poste.
+          navigate("/enrolement");
+          return;
+        }
+
+        const liste = await api.listePostesDisponibles();
+        if (annule) return;
+        setPostes(liste);
+        setPhase("choix");
+      } catch (e) {
+        if (!annule) setErreurChargement(e);
+      }
+    })();
+    return () => {
+      annule = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [candidatId]);
+
+  async function choisir(poste) {
+    if (phase === "envoi") return;
+    setPosteChoisiId(poste.id);
+    setPhase("envoi");
+    setErreurEnvoi(null);
+    try {
+      await api.choisirPoste(candidatId, poste.id);
+      navigate("/parcours");
+    } catch (e) {
+      setErreurEnvoi(e);
+      setPhase("choix");
+      setPosteChoisiId(null);
+    }
+  }
+
+  if (!candidatId) return null;
+
+  if (erreurChargement) {
+    return (
+      <PageCadre titre="VOTRE POSTE">
+        <p className="sous-texte" style={{ color: "var(--red)" }}>
+          {erreurChargement.status === 404
+            ? "Dossier introuvable. Réinscrivez-vous."
+            : erreurChargement.message}
+        </p>
+        <Link to="/parcours" className="bouton bouton-primaire">
+          Retour à mon parcours
+        </Link>
+      </PageCadre>
+    );
+  }
+
+  if (phase === "chargement") {
+    return (
+      <PageCadre titre="VOTRE POSTE">
+        <p className="sous-texte">Chargement...</p>
+      </PageCadre>
+    );
+  }
+
+  return (
+    <PageCadre titre="VOTRE POSTE">
+      <div style={{ textAlign: "center", marginBottom: 4 }}>
+        <h1 className="grand-titre" style={{ fontSize: "1.5rem", marginBottom: 8 }}>
+          Quel est votre poste ?
+        </h1>
+        <p className="sous-texte" style={{ margin: 0 }}>
+          Visage enrôlé ! Choisissez le poste que vous souhaitez occuper.
+        </p>
+      </div>
+
+      {erreurEnvoi && (
+        <p className="sous-texte" style={{ color: "var(--red)", textAlign: "center" }}>
+          {erreurEnvoi.status === 409
+            ? erreurEnvoi.message
+            : "Le choix n'a pas pu être enregistré, réessayez."}
+        </p>
+      )}
+
+      {postes.length === 0 && (
+        <p className="sous-texte" style={{ textAlign: "center" }}>
+          Aucun poste n&apos;est disponible pour le moment. Patientez, un
+          responsable va bientôt en ajouter.
+        </p>
+      )}
+
+      {postes.length > 0 && (
+        <div
+          style={{
+            width: "100%",
+            maxWidth: 360,
+            maxHeight: "52vh",
+            overflowY: "auto",
+            display: "flex",
+            flexDirection: "column",
+            gap: 12,
+            padding: "4px 2px",
+          }}
+        >
+          {postes.map((p) => {
+            const info = posteParId(p.type_poste);
+            const enCours = phase === "envoi" && posteChoisiId === p.id;
+            return (
+              <button
+                key={p.id}
+                type="button"
+                className="bouton bouton-primaire"
+                onClick={() => choisir(p)}
+                disabled={phase === "envoi"}
+                style={{
+                  width: "100%",
+                  padding: "16px 20px",
+                  textAlign: "left",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  opacity: phase === "envoi" && !enCours ? 0.5 : 1,
+                }}
+              >
+                <span>{info.label}</span>
+                {enCours && <span className="sous-texte" style={{ margin: 0 }}>...</span>}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </PageCadre>
+  );
+}
+
+function PageCadre({ titre, children }) {
+  return (
+    <div className="ecran">
+      <div className="entete-systeme">
+        <Link to="/parcours" style={{ color: "inherit", textDecoration: "none" }}>
+          &larr; Retour
+        </Link>
+        <span>{titre}</span>
+      </div>
+      <div
+        className="ecran-contenu"
+        style={{ justifyContent: "center", alignItems: "center", gap: 20, paddingTop: 24 }}
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
+
+================================================================================
+
+# src/pages/Connexion.jsx
+--------------------------------------------------------------------------------
+import { useState } from "react";
+import { useNavigate, Link } from "react-router-dom";
+import { api } from "../api/api";
+
+export default function Connexion() {
+  const [candidatId, setCandidatId] = useState("");
+  const [enCours, setEnCours] = useState(false);
+  const [erreur, setErreur] = useState(null);
+  const navigate = useNavigate();
+
+  async function envoyer(e) {
+    e.preventDefault();
+    setErreur(null);
+    setEnCours(true);
+    try {
+      const id = candidatId.trim();
+      const candidat = await api.recupererCandidat(id);
+      localStorage.setItem("candidatId", String(candidat.id));
+      navigate("/parcours");
+    } catch (e) {
+      setErreur(
+        e.status === 404
+          ? "Aucun dossier avec cet identifiant."
+          : e.message
+      );
+    } finally {
+      setEnCours(false);
+    }
+  }
+
+  return (
+    <div className="ecran">
+      <div className="entete-systeme">
+        <Link to="/" style={{ color: "inherit", textDecoration: "none" }}>
+          &larr; Retour
+        </Link>
+        <span>CONNEXION</span>
+      </div>
+
+      <div className="ecran-contenu" style={{ justifyContent: "center" }}>
+        <h1 className="grand-titre" style={{ marginBottom: 6 }}>
+          Reprendre
+        </h1>
+        <p className="sous-texte" style={{ marginBottom: 28 }}>
+          Saisissez l&apos;identifiant reçu à l&apos;inscription (affiché sur
+          votre parcours, ex. #000042).
+        </p>
+
+        <form onSubmit={envoyer}>
+          <div className="groupe-champ">
+            <label htmlFor="candidatId">Identifiant candidat</label>
+            <input
+              id="candidatId"
+              className="champ"
+              placeholder="Ex. 42"
+              value={candidatId}
+              onChange={(e) => setCandidatId(e.target.value)}
+              required
+              inputMode="numeric"
+            />
+          </div>
+
+          {erreur && <p className="erreur-form">{erreur}</p>}
+
+          <button
+            className="bouton bouton-primaire bouton-bloc"
+            disabled={enCours}
+          >
+            {enCours ? "Connexion..." : "Voir mon parcours"}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+================================================================================
+
+# src/pages/Enrolement.jsx
+--------------------------------------------------------------------------------
+import { useEffect, useRef, useState } from "react";
+import { useNavigate, Link } from "react-router-dom";
+import { api } from "../api/api";
+import { useCameraVisage } from "../hooks/useCameraVisage";
+
+const DUREE_COMPTE_MS = 5000;
+const DELAI_CAPTURE_MS = 2000; // photo prise pendant le compte, pas tout à la fin
+
+// phase : "chargement" | "camera" | "compte" | "traitement" | "resultat"
+export default function Enrolement() {
+  const navigate = useNavigate();
+  const candidatId = localStorage.getItem("candidatId");
+
+  const [phase, setPhase] = useState("chargement");
+  const [candidat, setCandidat] = useState(null);
+  const [erreurChargement, setErreurChargement] = useState(null);
+  const [erreurEnvoi, setErreurEnvoi] = useState(null);
+  const [resultat, setResultat] = useState(null);
+  const [restant, setRestant] = useState(Math.ceil(DUREE_COMPTE_MS / 1000));
+
+  const photoRef = useRef(null);
+  const dejaCaptureRef = useRef(false);
+
+  const camActive = phase === "camera" || phase === "compte";
+  const { videoRef, pret, erreur: erreurCamera, capturerPhoto } = useCameraVisage(camActive);
+
+  useEffect(() => {
+    if (!candidatId) {
+      navigate("/");
+      return;
+    }
+    let annule = false;
+    (async () => {
+      try {
+        const c = await api.recupererCandidat(candidatId);
+        if (annule) return;
+        if (c.statut !== "actif") {
+          // Rien à enrôler (pas encore sélectionné, ou parcours terminé) :
+          // retour à l'écran de suivi qui explique pourquoi.
+          navigate("/parcours");
+          return;
+        }
+        if (c.poste_attribue) {
+          // Poste déjà choisi : plus rien à faire ici.
+          navigate("/parcours");
+          return;
+        }
+        if (c.visage_enrole) {
+          // Visage déjà enrôlé, mais poste pas encore choisi : direction
+          // l'écran de choix du poste plutôt que de repasser par la caméra.
+          navigate("/choisir-poste");
+          return;
+        }
+        setCandidat(c);
+        setPhase("camera");
+      } catch (e) {
+        if (!annule) setErreurChargement(e);
+      }
+    })();
+    return () => {
+      annule = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [candidatId]);
+
+  // Boucle du compte à rebours
+  useEffect(() => {
+    if (phase !== "compte") return;
+    dejaCaptureRef.current = false;
+    const debut = Date.now();
+    const intervalle = setInterval(async () => {
+      const ecoule = Date.now() - debut;
+      setRestant(Math.max(0, Math.ceil((DUREE_COMPTE_MS - ecoule) / 1000)));
+
+      if (!dejaCaptureRef.current && ecoule >= DELAI_CAPTURE_MS) {
+        dejaCaptureRef.current = true;
+        try {
+          photoRef.current = await capturerPhoto();
+        } catch {
+          photoRef.current = null;
+        }
+      }
+      if (ecoule >= DUREE_COMPTE_MS) {
+        clearInterval(intervalle);
+        envoyer();
+      }
+    }, 100);
+    return () => clearInterval(intervalle);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase]);
+
+  async function envoyer() {
+    setPhase("traitement");
+    setErreurEnvoi(null);
+    try {
+      if (!photoRef.current) {
+        throw new Error("Aucune photo n'a pu être prise, réessayez.");
+      }
+      const reponse = await api.enrolerVisage(candidatId, photoRef.current);
+      setResultat(reponse);
+      setPhase("resultat");
+    } catch (e) {
+      setErreurEnvoi(e);
+      setPhase("resultat");
+    } finally {
+      photoRef.current = null;
+    }
+  }
+
+  function relancer() {
+    setResultat(null);
+    setErreurEnvoi(null);
+    setRestant(Math.ceil(DUREE_COMPTE_MS / 1000));
+    setPhase("camera");
+  }
+
+  if (!candidatId) return null;
+
+  if (erreurChargement) {
+    return (
+      <PageCadre titre="ENRÔLEMENT">
+        <p className="sous-texte" style={{ color: "var(--red)" }}>
+          {erreurChargement.status === 404
+            ? "Dossier introuvable. Réinscrivez-vous."
+            : erreurChargement.message}
+        </p>
+        <Link to="/parcours" className="bouton bouton-primaire">
+          Retour à mon parcours
+        </Link>
+      </PageCadre>
+    );
+  }
+
+  if (phase === "chargement" || !candidat) {
+    return (
+      <PageCadre titre="ENRÔLEMENT">
+        <p className="sous-texte">Chargement...</p>
+      </PageCadre>
+    );
+  }
+
+  return (
+    <PageCadre titre="ENRÔLEMENT" nom={candidat.nom}>
+      {(phase === "camera" || phase === "compte") && (
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 20 }}>
+          <div
+            style={{
+              position: "relative",
+              width: "100%",
+              maxWidth: 340,
+              aspectRatio: "3 / 4",
+              borderRadius: 16,
+              overflow: "hidden",
+              background: "#000",
+              border: "2px solid var(--border, #333)",
+            }}
+          >
+            <video
+              ref={videoRef}
+              muted
+              playsInline
+              style={{
+                width: "100%",
+                height: "100%",
+                objectFit: "cover",
+                transform: "scaleX(-1)", // effet miroir "selfie"
+              }}
+            />
+            <div
+              style={{
+                position: "absolute",
+                inset: 24,
+                border: "2px dashed rgba(255,255,255,0.6)",
+                borderRadius: 12,
+                pointerEvents: "none",
+              }}
+            />
+            {phase === "compte" && (
+              <div
+                style={{
+                  position: "absolute",
+                  bottom: 12,
+                  left: 0,
+                  right: 0,
+                  textAlign: "center",
+                  fontSize: 40,
+                  fontWeight: 700,
+                  color: "#fff",
+                  textShadow: "0 2px 8px rgba(0,0,0,0.7)",
+                }}
+              >
+                {restant}
+              </div>
+            )}
+          </div>
+
+          {erreurCamera && (
+            <p className="sous-texte" style={{ color: "var(--red)" }}>
+              {erreurCamera}
+            </p>
+          )}
+
+          {phase === "camera" && (
+            <>
+              <p className="sous-texte" style={{ textAlign: "center" }}>
+                {pret
+                  ? "Centrez votre visage dans le cadre, puis lancez la capture."
+                  : "Activation de la caméra frontale..."}
+              </p>
+              <button
+                type="button"
+                className="bouton bouton-primaire"
+                disabled={!pret}
+                onClick={() => setPhase("compte")}
+                style={{ padding: "14px 30px" }}
+              >
+                Je suis prêt(e)
+              </button>
+            </>
+          )}
+
+          {phase === "compte" && (
+            <p className="sous-texte" style={{ textAlign: "center" }}>
+              Ne bougez plus, la photo va être prise...
+            </p>
+          )}
+        </div>
+      )}
+
+      {phase === "traitement" && (
+        <p className="sous-texte" style={{ textAlign: "center" }}>
+          Analyse en cours...
+        </p>
+      )}
+
+      {phase === "resultat" && erreurEnvoi && (
+        <div className="carte-badge" style={{ borderColor: "var(--red)" }}>
+          <p className="sous-texte" style={{ marginTop: 0, marginBottom: 8, color: "var(--red)" }}>
+            {messageErreurLisible(erreurEnvoi)}
+          </p>
+          <button type="button" className="bouton bouton-primaire" onClick={relancer}>
+            Réessayer
+          </button>
+        </div>
+      )}
+
+      {phase === "resultat" && resultat && (
+        <div className="carte-badge" style={{ borderColor: "var(--green)" }}>
+          <p className="sous-texte" style={{ marginTop: 0, marginBottom: 4, color: "var(--green)" }}>
+            Visage enregistré avec succès !
+          </p>
+          <p className="sous-texte" style={{ marginTop: 0, marginBottom: 0 }}>
+            Dernière étape : choisissez votre poste.
+          </p>
+          <Link
+            to="/choisir-poste"
+            className="bouton bouton-primaire"
+            style={{ display: "inline-block", marginTop: 14 }}
+          >
+            Choisir mon poste
+          </Link>
+        </div>
+      )}
+    </PageCadre>
+  );
+}
+
+function PageCadre({ titre, nom, children }) {
+  return (
+    <div className="ecran">
+      <div className="entete-systeme">
+        <Link to="/parcours" style={{ color: "inherit", textDecoration: "none" }}>
+          &larr; {nom || "Retour"}
+        </Link>
+        <span>{titre}</span>
+      </div>
+      <div
+        className="ecran-contenu"
+        style={{ justifyContent: "center", alignItems: "center", gap: 20, paddingTop: 24 }}
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function messageErreurLisible(e) {
+  const brut = e?.message || "";
+  if (/plusieurs visages/i.test(brut)) {
+    return "Plusieurs personnes ont été détectées. Assurez-vous d'être seul(e) dans le cadre.";
+  }
+  if (/aucun visage/i.test(brut)) {
+    return "Aucun visage détecté. Rapprochez-vous et centrez votre visage.";
+  }
+  if (/503|indisponible|hors ligne/i.test(brut)) {
+    return "Service de reconnaissance indisponible. Réessayez dans un instant.";
+  }
+  if (/429|rate/i.test(brut)) {
+    return "Trop de tentatives rapprochées. Patientez quelques secondes.";
+  }
+  return "La photo n'a pas pu être analysée (lumière, flou...). Réessayez.";
+}
+
+================================================================================
+
+# src/pages/Home.jsx
+--------------------------------------------------------------------------------
+import { Link } from "react-router-dom";
+
+export default function Home() {
+  return (
+    <div className="ecran">
+      <div className="entete-systeme">
+        <span>
+          <span className="led blue" />
+          Carrière Express
+        </span>
+        <span>ACCUEIL</span>
+      </div>
+
+      <nav
+        style={{
+          display: "flex",
+          justifyContent: "flex-end",
+          gap: 18,
+          padding: "18px 22px 0",
+        }}
+      >
+        <Link
+          to="/postuler"
+          className="code-mono"
+          style={{
+            color: "var(--text-dim)",
+            fontSize: 13,
+            textDecoration: "none",
+          }}
+        >
+          S'inscrire
+        </Link>
+        <Link
+          to="/connexion"
+          className="code-mono"
+          style={{
+            color: "var(--text-dim)",
+            fontSize: 13,
+            textDecoration: "none",
+          }}
+        >
+          Reprendre
+        </Link>
+      </nav>
+
+      <div
+        className="ecran-contenu"
+        style={{
+          justifyContent: "center",
+          alignItems: "center",
+          textAlign: "center",
+          gap: 28,
+        }}
+      >
+        <div>
+          <h1 className="grand-titre">
+            Inscrivez-vous
+            <br />
+            <span style={{ color: "var(--text-dim)" }}>(inscription)</span>
+            <br />
+            d&apos;abord.
+          </h1>
+          <p className="sous-texte">Votre carrière commence sur cet écran.</p>
+        </div>
+
+        <Link
+          to="/postuler"
+          className="bouton bouton-primaire"
+          style={{ padding: "16px 34px" }}
+        >
+          S'inscrire
+        </Link>
+
+        <Link
+          to="/connexion"
+          className="sous-texte"
+          style={{ textDecoration: "underline", color: "var(--text-dim)" }}
+        >
+          Déjà inscrit ? Reprendre avec mon identifiant
+        </Link>
+      </div>
+    </div>
+  );
+}
+
+================================================================================
+
+# src/pages/Parcours.jsx
+--------------------------------------------------------------------------------
+import { useEffect, useState } from "react";
+import { useNavigate, Link } from "react-router-dom";
+import { api } from "../api/api";
+import { usePolling } from "../hooks/usePolling";
+import { posteParId } from "../constants/postes";
+
+const LEDS_PAR_STATUT = { attente: "amber", actif: "green", historique: "red" };
+const LIBELLES_STATUT = {
+  attente: "En attente",
+  actif: "Sélectionné",
+  historique: "Parcours terminé",
+};
+
+/** Mot de passe démo (vérifié aussi côté serveur /demo/*). */
+const DEMO_PWD = "azerty";
+
+export default function Parcours() {
+  const navigate = useNavigate();
+  const candidatId = localStorage.getItem("candidatId");
+
+  const [demoOpen, setDemoOpen] = useState(false);
+  const [demoUnlocked, setDemoUnlocked] = useState(
+    () => sessionStorage.getItem("demoUnlocked") === "1"
+  );
+  const [pwd, setPwd] = useState("");
+  const [demoMsg, setDemoMsg] = useState(null);
+  const [demoBusy, setDemoBusy] = useState(false);
+  const [uidFactice, setUidFactice] = useState(null);
+
+  useEffect(() => {
+    if (!candidatId) navigate("/");
+  }, [candidatId, navigate]);
+
+  const { donnees: candidat, erreur } = usePolling(
+    () => api.recupererCandidat(candidatId),
+    2500,
+    [candidatId]
+  );
+
+  function confirmerPwd(e) {
+    e.preventDefault();
+    if (pwd.trim() !== DEMO_PWD) {
+      setDemoMsg("Mot de passe incorrect.");
+      return;
+    }
+    sessionStorage.setItem("demoUnlocked", "1");
+    setDemoUnlocked(true);
+    setDemoOpen(false);
+    setPwd("");
+    setDemoMsg(null);
+  }
+
+  async function activerCarte() {
+    setDemoBusy(true);
+    setDemoMsg(null);
+    try {
+      const res = await api.demoCarteFactice(candidatId, DEMO_PWD);
+      setUidFactice(res.uidcarte);
+      setDemoMsg(res.message || "Vous avez utilisé la carte factice, monseigneur.");
+    } catch (err) {
+      setDemoMsg(err.message || "Erreur");
+    } finally {
+      setDemoBusy(false);
+    }
+  }
+
+  async function simulerScan() {
+    setDemoBusy(true);
+    setDemoMsg(null);
+    try {
+      const res = await api.demoSimulerScan(candidatId, DEMO_PWD);
+      setUidFactice(res.uidcarte);
+      setDemoMsg(
+        res.message ||
+          "Vous avez utilisé la carte factice, monseigneur. Passez devant la caméra."
+      );
+    } catch (err) {
+      setDemoMsg(err.message || "Erreur");
+    } finally {
+      setDemoBusy(false);
+    }
+  }
+
+  if (!candidatId) return null;
+
+  if (erreur && !candidat) {
+    return (
+      <div className="ecran">
+        <div className="entete-systeme">
+          <Link to="/" style={{ color: "inherit", textDecoration: "none" }}>
+            &larr; Accueil
+          </Link>
+          <span>PARCOURS</span>
+        </div>
+        <div
+          className="ecran-contenu"
+          style={{ justifyContent: "center", alignItems: "center", gap: 16 }}
+        >
+          <p className="sous-texte" style={{ color: "var(--red)" }}>
+            {erreur.status === 404
+              ? "Dossier introuvable. Réinscrivez-vous."
+              : erreur.message}
+          </p>
+          <button
+            className="bouton bouton-primaire"
+            onClick={() => {
+              localStorage.removeItem("candidatId");
+              navigate("/postuler");
+            }}
+          >
+            Postuler à nouveau
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!candidat) {
+    return (
+      <div className="ecran">
+        <div
+          className="ecran-contenu"
+          style={{ justifyContent: "center", alignItems: "center" }}
+        >
+          <p className="sous-texte">Chargement de votre dossier...</p>
+        </div>
+      </div>
+    );
+  }
+
+  const statut = candidat.statut;
+  const poste = candidat.poste_attribue
+    ? posteParId(candidat.poste_attribue)
+    : null;
+  const idCourt = String(candidat.id).padStart(6, "0").toUpperCase();
+
+  return (
+    <div className="ecran">
+      <div className="entete-systeme" style={{ position: "relative" }}>
+        <span>
+          <span className={`led ${LEDS_PAR_STATUT[statut] || "blue"}`} />
+          {candidat.nom}
+        </span>
+        <span className="code-mono">#{idCourt}</span>
+
+        {statut === "actif" && poste && (
+          <button
+            type="button"
+            onClick={() => {
+              setDemoMsg(null);
+              setDemoOpen(true);
+            }}
+            title="Superadmin"
+            aria-label="Superadmin"
+            style={{
+              position: "absolute",
+              right: 10,
+              top: "50%",
+              transform: "translateY(-50%)",
+              background: "transparent",
+              border: "none",
+              color: "var(--text-dim)",
+              fontSize: 11,
+              opacity: 0.4,
+              cursor: "pointer",
+              padding: "4px 6px",
+            }}
+          >
+            ◆
+          </button>
+        )}
+      </div>
+
+      {/* Modal mot de passe superadmin */}
+      {demoOpen && !demoUnlocked && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.72)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 50,
+            padding: 16,
+          }}
+        >
+          <form
+            onSubmit={confirmerPwd}
+            className="carte-badge"
+            style={{ maxWidth: 320, width: "100%" }}
+          >
+            <p className="sous-texte" style={{ marginTop: 0, marginBottom: 12 }}>
+              Accès superadmin
+            </p>
+            <input
+              className="champ"
+              type="password"
+              placeholder="Mot de passe"
+              value={pwd}
+              onChange={(e) => setPwd(e.target.value)}
+              autoFocus
+              autoComplete="off"
+            />
+            {demoMsg && (
+              <p className="erreur-form" style={{ marginTop: 8 }}>
+                {demoMsg}
+              </p>
+            )}
+            <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
+              <button type="submit" className="bouton bouton-primaire">
+                Confirmer
+              </button>
+              <button
+                type="button"
+                className="bouton"
+                onClick={() => {
+                  setDemoOpen(false);
+                  setPwd("");
+                  setDemoMsg(null);
+                }}
+              >
+                Annuler
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      <div className="ecran-contenu" style={{ gap: 24, paddingTop: 32 }}>
+        <div>
+          <p className="sous-texte" style={{ marginBottom: 4 }}>
+            Statut
+          </p>
+          <h1 className="grand-titre" style={{ fontSize: "1.6rem" }}>
+            {LIBELLES_STATUT[statut] || statut}
+          </h1>
+        </div>
+
+        {statut === "attente" && (
+          <div className="carte-badge">
+            <p className="sous-texte" style={{ margin: 0, color: "var(--text)" }}>
+              Votre candidature est en file d&apos;attente.
+            </p>
+            <p className="sous-texte" style={{ marginTop: 8, marginBottom: 0 }}>
+              Un responsable va bientôt vous appeler. Gardez cet écran ouvert :
+              il se mettra à jour automatiquement.
+            </p>
+          </div>
+        )}
+
+        {statut === "actif" && !poste && !candidat.visage_enrole && (
+          <div className="carte-badge">
+            <p
+              className="sous-texte"
+              style={{ marginTop: 0, marginBottom: 4, color: "var(--green)" }}
+            >
+              Vous avez été sélectionné !
+            </p>
+            <p className="sous-texte" style={{ marginTop: 0, marginBottom: 16 }}>
+              Dernière étape avant votre poste : enrôlez votre visage
+              directement depuis ce téléphone, avec votre caméra frontale.
+            </p>
+            <style>{`
+              @keyframes clignote-enroler {
+                0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(56, 189, 148, 0.55); }
+                50% { opacity: 0.85; box-shadow: 0 0 0 10px rgba(56, 189, 148, 0); }
+              }
+            `}</style>
+            <Link
+              to="/enrolement"
+              className="bouton bouton-primaire"
+              style={{
+                display: "inline-block",
+                padding: "16px 30px",
+                animation: "clignote-enroler 1.5s ease-in-out infinite",
+              }}
+            >
+              Enrôler mon visage
+            </Link>
+          </div>
+        )}
+
+        {statut === "actif" && !poste && candidat.visage_enrole && (
+          <div className="carte-badge">
+            <p
+              className="sous-texte"
+              style={{ marginTop: 0, marginBottom: 4, color: "var(--green)" }}
+            >
+              Visage enrôlé !
+            </p>
+            <p className="sous-texte" style={{ marginTop: 0, marginBottom: 16 }}>
+              Dernière étape : choisissez le poste que vous souhaitez occuper.
+            </p>
+            <style>{`
+              @keyframes clignote-poste {
+                0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(56, 189, 148, 0.55); }
+                50% { opacity: 0.85; box-shadow: 0 0 0 10px rgba(56, 189, 148, 0); }
+              }
+            `}</style>
+            <Link
+              to="/choisir-poste"
+              className="bouton bouton-primaire"
+              style={{
+                display: "inline-block",
+                padding: "16px 30px",
+                animation: "clignote-poste 1.5s ease-in-out infinite",
+              }}
+            >
+              Choisir mon poste
+            </Link>
+          </div>
+        )}
+
+        {statut === "actif" && poste && (
+          <div className="carte-badge" style={{ borderColor: "var(--green)" }}>
+            <p
+              className="sous-texte"
+              style={{ marginTop: 0, marginBottom: 4, color: "var(--green)" }}
+            >
+              Poste choisi : {poste.label}
+            </p>
+            <p className="sous-texte" style={{ marginTop: 0, marginBottom: 0 }}>
+              {poste.message}
+            </p>
+            <p className="sous-texte" style={{ marginTop: 12, marginBottom: 0 }}>
+              Demandez maintenant votre carte à l&apos;administrateur. Une fois
+              la carte reçue, présentez-vous à l&apos;écran de l&apos;entreprise
+              : carte + visage à chaque entrée et sortie.
+            </p>
+          </div>
+        )}
+
+        {/* Panneau démo superadmin (après déverrouillage) */}
+        {statut === "actif" && poste && demoUnlocked && (
+          <div
+            className="carte-badge"
+            style={{ borderColor: "var(--amber, #d4a017)" }}
+          >
+            <p
+              className="sous-texte"
+              style={{
+                marginTop: 0,
+                marginBottom: 4,
+                color: "var(--amber, #d4a017)",
+              }}
+            >
+              Mode superadmin (démo)
+            </p>
+            <p className="sous-texte" style={{ marginTop: 0, marginBottom: 0 }}>
+              {candidat.nom} · {poste.label}
+              {uidFactice && (
+                <>
+                  {" "}
+                  · carte <span className="code-mono">{uidFactice}</span>
+                </>
+              )}
+            </p>
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: 10,
+                marginTop: 14,
+              }}
+            >
+              <button
+                type="button"
+                className="bouton bouton-primaire"
+                disabled={demoBusy}
+                onClick={activerCarte}
+              >
+                {demoBusy ? "…" : "Activer carte factice (1 h)"}
+              </button>
+              <button
+                type="button"
+                className="bouton bouton-primaire"
+                disabled={demoBusy}
+                onClick={simulerScan}
+              >
+                {demoBusy ? "…" : "Simuler passage carte → caméra"}
+              </button>
+            </div>
+            {demoMsg && (
+              <p
+                className="sous-texte"
+                style={{ marginBottom: 0, marginTop: 12 }}
+              >
+                {demoMsg}
+              </p>
+            )}
+          </div>
+        )}
+
+        {statut === "historique" && (
+          <div className="carte-badge" style={{ borderColor: "var(--red)" }}>
+            <p
+              className="sous-texte"
+              style={{ marginTop: 0, marginBottom: 0, color: "var(--text)" }}
+            >
+              {poste
+                ? `Parcours terminé. Dernier poste : ${poste.label}.`
+                : "Votre parcours est terminé (candidature non retenue ou fin de simulation)."}
+            </p>
+          </div>
+        )}
+
+        <p className="sous-texte" style={{ fontSize: 12, marginTop: "auto" }}>
+          Identifiant : <span className="code-mono">#{idCourt}</span> — notez-le
+          pour reprendre plus tard.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+================================================================================
+
+# src/pages/Postuler.jsx
+--------------------------------------------------------------------------------
+import { useState } from "react";
+import { useNavigate, Link } from "react-router-dom";
+import { api } from "../api/api";
+
+export default function Postuler() {
+  const [nom, setNom] = useState("");
+  const [enCours, setEnCours] = useState(false);
+  const [erreur, setErreur] = useState(null);
+  const navigate = useNavigate();
+
+  async function envoyer(e) {
+    e.preventDefault();
+    setErreur(null);
+    setEnCours(true);
+    try {
+      const candidat = await api.postuler(nom.trim());
+      localStorage.setItem("candidatId", String(candidat.id));
+      navigate("/parcours");
+    } catch (e) {
+      setErreur(e.message);
+    } finally {
+      setEnCours(false);
+    }
+  }
+
+  return (
+    <div className="ecran">
+      <div className="entete-systeme">
+        <Link to="/" style={{ color: "inherit", textDecoration: "none" }}>
+          &larr; Retour
+        </Link>
+        <span>CANDIDATURE</span>
+      </div>
+
+      <div className="ecran-contenu" style={{ justifyContent: "center" }}>
+        <h1 className="grand-titre" style={{ marginBottom: 6 }}>
+          S'inscrire
+        </h1>
+        <p className="sous-texte" style={{ marginBottom: 28 }}>
+          Votre nom suffit. Le reste se joue à l&apos;entretien.
+        </p>
+
+        <form onSubmit={envoyer}>
+          <div className="groupe-champ">
+            <label htmlFor="nom">Nom complet</label>
+            <input
+              id="nom"
+              className="champ"
+              placeholder="Ex. Andry Rajoelina"
+              value={nom}
+              onChange={(e) => setNom(e.target.value)}
+              required
+              maxLength={50}
+            />
+          </div>
+
+          {erreur && <p className="erreur-form">{erreur}</p>}
+
+          <button
+            className="bouton bouton-primaire bouton-bloc"
+            disabled={enCours}
+          >
+            {enCours ? "Envoi..." : "Envoyer ma candidature"}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+================================================================================
+
+# vite.config.js
+--------------------------------------------------------------------------------
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+
+export default defineConfig({
+  plugins: [react()],
+  server: { port: 5173 },
+});
+
+================================================================================
+

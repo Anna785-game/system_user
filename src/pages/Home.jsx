@@ -28,7 +28,7 @@ export default function Home() {
             textDecoration: "none",
           }}
         >
-          Postuler
+          S'inscrire
         </Link>
         <Link
           to="/connexion"
@@ -56,7 +56,7 @@ export default function Home() {
           <h1 className="grand-titre">
             Inscrivez-vous
             <br />
-            <span style={{ color: "var(--text-dim)" }}>(postulez)</span>
+            <span style={{ color: "var(--text-dim)" }}>(inscription)</span>
             <br />
             d&apos;abord.
           </h1>
@@ -68,7 +68,7 @@ export default function Home() {
           className="bouton bouton-primaire"
           style={{ padding: "16px 34px" }}
         >
-          Postuler
+          S'inscrire
         </Link>
 
         <Link
@@ -76,7 +76,7 @@ export default function Home() {
           className="sous-texte"
           style={{ textDecoration: "underline", color: "var(--text-dim)" }}
         >
-          Déjà postulé ? Reprendre avec mon identifiant
+          Déjà inscrit ? Reprendre avec mon identifiant
         </Link>
       </div>
     </div>
