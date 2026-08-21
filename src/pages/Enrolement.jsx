@@ -1,31 +1,24 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { api } from "../api/api";
 import { useCameraVisage } from "../hooks/useCameraVisage";
 
-const DUREE_COMPTE_MS = 5000;
-const DELAI_CAPTURE_MS = 2000; // photo prise pendant le compte, pas tout à la fin
+// phases :
+//   "chargement" | "attente" | "compte" | "envoi" | "resultat" | "erreur"
 
-// phase : "chargement" | "camera" | "compte" | "traitement" | "resultat"
 export default function Enrolement() {
   const navigate = useNavigate();
   const candidatId = localStorage.getItem("candidatId");
 
   const [phase, setPhase] = useState("chargement");
-  const [candidat, setCandidat] = useState(null);
-  const [erreurChargement, setErreurChargement] = useState(null);
-  const [erreurEnvoi, setErreurEnvoi] = useState(null);
+  const [nom, setNom] = useState("");
   const [resultat, setResultat] = useState(null);
-  const [restant, setRestant] = useState(Math.ceil(DUREE_COMPTE_MS / 1000));
-  // null | "envoi" | "ok" | Error — demande d'enrôlement sur l'écran kiosque
-  const [demandeEcran, setDemandeEcran] = useState(null);
+  const [erreurEnvoi, setErreurEnvoi] = useState(null);
+  const [compte, setCompte] = useState(null); // secondes restantes
 
-  const photoRef = useRef(null);
-  const dejaCaptureRef = useRef(false);
-
-  const camActive = phase === "camera" || phase === "compte";
+  const actif = phase === "attente" || phase === "compte";
   const { videoRef, pret, erreur: erreurCamera, capturerPhoto } =
-    useCameraVisage(camActive);
+    useCameraVisage(actif);
 
   useEffect(() => {
     if (!candidatId) {
@@ -41,18 +34,15 @@ export default function Enrolement() {
           navigate("/parcours");
           return;
         }
-        if (c.poste_attribue) {
-          navigate("/parcours");
-          return;
-        }
         if (c.visage_enrole) {
+          // Déjà enrôlé → on passe direct au choix de poste
           navigate("/choisir-poste");
           return;
         }
-        setCandidat(c);
-        setPhase("camera");
-      } catch (e) {
-        if (!annule) setErreurChargement(e);
+        setNom(c.nom || "");
+        setPhase("attente");
+      } catch {
+        if (!annule) navigate("/parcours");
       }
     })();
     return () => {
@@ -61,281 +51,188 @@ export default function Enrolement() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [candidatId]);
 
-  // Boucle du compte à rebours
+  // Compte à rebours 5 s (capture à 2 s)
   useEffect(() => {
     if (phase !== "compte") return;
-    dejaCaptureRef.current = false;
-    const debut = Date.now();
-    const intervalle = setInterval(async () => {
-      const ecoule = Date.now() - debut;
-      setRestant(Math.max(0, Math.ceil((DUREE_COMPTE_MS - ecoule) / 1000)));
 
-      if (!dejaCaptureRef.current && ecoule >= DELAI_CAPTURE_MS) {
-        dejaCaptureRef.current = true;
+    const DUREE = 5000;
+    const CAPTURE_A = 2000;
+    const debut = Date.now();
+    let dejaCapture = false;
+
+    const id = setInterval(async () => {
+      const ecoule = Date.now() - debut;
+      setCompte(Math.max(0, Math.ceil((DUREE - ecoule) / 1000)));
+
+      if (!dejaCapture && ecoule >= CAPTURE_A) {
+        dejaCapture = true;
         try {
-          photoRef.current = await capturerPhoto();
-        } catch {
-          photoRef.current = null;
+          const blob = await capturerPhoto();
+          setPhase("envoi");
+          await envoyerPhoto(blob);
+        } catch (e) {
+          setErreurEnvoi(e);
+          setPhase("erreur");
         }
       }
-      if (ecoule >= DUREE_COMPTE_MS) {
-        clearInterval(intervalle);
-        envoyer();
+
+      if (ecoule >= DUREE) {
+        clearInterval(id);
       }
     }, 100);
-    return () => clearInterval(intervalle);
+
+    return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase]);
 
-  async function envoyer() {
-    setPhase("traitement");
-    setErreurEnvoi(null);
+  async function envoyerPhoto(blob) {
     try {
-      if (!photoRef.current) {
-        throw new Error("Aucune photo n'a pu être prise, réessayez.");
-      }
-      const reponse = await api.enrolerVisage(candidatId, photoRef.current);
-      setResultat(reponse);
+      const data = await api.enrolerVisage(candidatId, blob);
+      setResultat(data);
       setPhase("resultat");
     } catch (e) {
       setErreurEnvoi(e);
-      setPhase("resultat");
-    } finally {
-      photoRef.current = null;
+      setPhase("erreur");
     }
+  }
+
+  function lancerCompte() {
+    if (!pret) return;
+    setCompte(5);
+    setPhase("compte");
   }
 
   function relancer() {
-    setResultat(null);
     setErreurEnvoi(null);
-    setDemandeEcran(null);
-    setRestant(Math.ceil(DUREE_COMPTE_MS / 1000));
-    setPhase("camera");
+    setResultat(null);
+    setCompte(null);
+    setPhase("attente");
   }
-
-  async function demanderSurEcran() {
-    if (demandeEcran === "envoi") return;
-    setDemandeEcran("envoi");
-    try {
-      await api.demanderEnrolementEcran(candidatId);
-      setDemandeEcran("ok");
-    } catch (e) {
-      setDemandeEcran(e);
-    }
-  }
-
-  // Après demande d'enrôlement écran : surveiller mon-statut et rediriger
-  // dès que le visage est enregistré (depuis le kiosque).
-  useEffect(() => {
-    if (demandeEcran !== "ok") return;
-    let annule = false;
-    const id = setInterval(async () => {
-      try {
-        const c = await api.recupererCandidat(candidatId);
-        if (annule) return;
-        if (c.visage_enrole) {
-          navigate(c.poste_attribue ? "/parcours" : "/choisir-poste");
-        }
-      } catch {
-        // ignore, on réessaie
-      }
-    }, 2500);
-    return () => {
-      annule = true;
-      clearInterval(id);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [demandeEcran, candidatId]);
 
   if (!candidatId) return null;
 
-  if (erreurChargement) {
+  if (phase === "chargement") {
     return (
-      <PageCadre titre="ENRÔLEMENT">
-        <p className="sous-texte" style={{ color: "var(--red)" }}>
-          {erreurChargement.status === 404
-            ? "Dossier introuvable. Réinscrivez-vous."
-            : erreurChargement.message}
-        </p>
-        <Link to="/parcours" className="bouton bouton-primaire">
-          Retour à mon parcours
-        </Link>
-      </PageCadre>
-    );
-  }
-
-  if (phase === "chargement" || !candidat) {
-    return (
-      <PageCadre titre="ENRÔLEMENT">
+      <PageCadre titre="ENRÔLEMENT" nom={nom}>
         <p className="sous-texte">Chargement...</p>
+        <BoutonRetour />
       </PageCadre>
     );
   }
 
   return (
-    <PageCadre titre="ENRÔLEMENT" nom={candidat.nom}>
-      {(phase === "camera" || phase === "compte") && (
-        <div
-          style={{
-            width: "100%",
-            maxWidth: 360,
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            gap: 16,
-          }}
-        >
+    <PageCadre titre="ENRÔLEMENT" nom={nom}>
+      {/* Bouton retour toujours visible tant qu'on n'a pas réussi */}
+      {phase !== "resultat" && <BoutonRetour />}
+
+      {phase === "attente" && (
+        <div style={{ textAlign: "center", width: "100%", maxWidth: 360 }}>
+          <h1 className="grand-titre" style={{ fontSize: "1.4rem", marginBottom: 8 }}>
+            Enregistrez votre visage
+          </h1>
+          <p className="sous-texte" style={{ marginBottom: 16 }}>
+            Placez votre visage dans le cadre, puis appuyez sur « Je suis prêt ».
+          </p>
+
           <div
             style={{
               position: "relative",
               width: "100%",
-              aspectRatio: "3 / 4",
+              aspectRatio: "3/4",
               borderRadius: 16,
               overflow: "hidden",
               background: "#111",
+              marginBottom: 16,
             }}
           >
             <video
               ref={videoRef}
               muted
               playsInline
-              autoPlay
               style={{
                 width: "100%",
                 height: "100%",
                 objectFit: "cover",
-                transform: "scaleX(-1)",
+                transform: "scaleX(-1)", // miroir selfie
               }}
             />
-            <div
-              style={{
-                position: "absolute",
-                inset: 24,
-                border: "2px solid rgba(255,255,255,0.55)",
-                borderRadius: 12,
-                pointerEvents: "none",
-              }}
-            />
-            {phase === "compte" && (
+            {!pret && !erreurCamera && (
               <div
                 style={{
                   position: "absolute",
-                  bottom: 12,
-                  left: 0,
-                  right: 0,
-                  textAlign: "center",
-                  fontSize: 40,
-                  fontWeight: 700,
-                  color: "#fff",
-                  textShadow: "0 2px 8px rgba(0,0,0,0.7)",
+                  inset: 0,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  background: "rgba(0,0,0,0.5)",
+                  color: "var(--text-dim)",
                 }}
               >
-                {restant}
+                Activation de la caméra...
               </div>
             )}
           </div>
 
           {erreurCamera && (
-            <div
-              className="carte-badge"
-              style={{ borderColor: "var(--red)", maxWidth: 360 }}
-            >
-              <p
-                className="sous-texte"
-                style={{ marginTop: 0, marginBottom: 8, color: "var(--red)" }}
-              >
-                {erreurCamera}
-              </p>
-              <p className="sous-texte" style={{ marginTop: 0, marginBottom: 14 }}>
-                Votre navigateur n&apos;autorise pas la caméra, ou celle-ci est
-                indisponible. Vous pouvez enrôler votre visage sur l&apos;écran
-                devant vous.
-              </p>
-              {demandeEcran === "ok" ? (
-                <p
-                  className="sous-texte"
-                  style={{ margin: 0, color: "var(--green)" }}
-                >
-                  L&apos;écran est prêt. Placez-vous devant lui : le message «
-                  Pour {candidat?.nom} seulement » s&apos;affiche. Revenez ici
-                  ensuite pour choisir votre poste.
-                </p>
-              ) : (
-                <button
-                  type="button"
-                  className="bouton bouton-primaire"
-                  disabled={demandeEcran === "envoi"}
-                  onClick={demanderSurEcran}
-                  style={{ width: "100%", padding: "14px 20px" }}
-                >
-                  {demandeEcran === "envoi"
-                    ? "Notification de l'écran…"
-                    : "Appuyez ici pour enrôler depuis l'écran devant vous"}
-                </button>
-              )}
-              {demandeEcran && typeof demandeEcran === "object" && (
-                <p
-                  className="sous-texte"
-                  style={{
-                    color: "var(--red)",
-                    marginBottom: 0,
-                    marginTop: 10,
-                  }}
-                >
-                  {demandeEcran.message || "Impossible de notifier l'écran."}
-                </p>
-              )}
-            </div>
-          )}
-
-          {phase === "camera" && !erreurCamera && (
-            <>
-              <p className="sous-texte" style={{ textAlign: "center" }}>
-                {pret
-                  ? "Centrez votre visage dans le cadre, puis lancez la capture."
-                  : "Activation de la caméra frontale..."}
-              </p>
-              <button
-                type="button"
-                className="bouton bouton-primaire"
-                disabled={!pret}
-                onClick={() => setPhase("compte")}
-                style={{ padding: "14px 30px" }}
-              >
-                Je suis prêt(e)
-              </button>
-            </>
-          )}
-
-          {phase === "compte" && (
-            <p className="sous-texte" style={{ textAlign: "center" }}>
-              Ne bougez plus, la photo va être prise...
+            <p className="sous-texte" style={{ color: "var(--red)", marginBottom: 12 }}>
+              {erreurCamera}
             </p>
           )}
+
+          <button
+            type="button"
+            className="bouton bouton-primaire"
+            style={{ width: "100%", padding: "16px 24px" }}
+            disabled={!pret}
+            onClick={lancerCompte}
+          >
+            {pret ? "Je suis prêt" : "Caméra en cours…"}
+          </button>
         </div>
       )}
 
-      {phase === "traitement" && (
-        <p className="sous-texte" style={{ textAlign: "center" }}>
-          Analyse en cours...
-        </p>
+      {phase === "compte" && (
+        <div style={{ textAlign: "center" }}>
+          <h1 className="grand-titre" style={{ fontSize: "1.4rem" }}>
+            Ne bougez plus…
+          </h1>
+          <p className="sous-texte" style={{ fontSize: "3rem", margin: "24px 0" }}>
+            {compte}
+          </p>
+          <video
+            ref={videoRef}
+            muted
+            playsInline
+            style={{
+              width: "100%",
+              maxWidth: 280,
+              borderRadius: 12,
+              transform: "scaleX(-1)",
+            }}
+          />
+        </div>
       )}
 
-      {phase === "resultat" && erreurEnvoi && (
-        <div className="carte-badge" style={{ borderColor: "var(--red)" }}>
-          <p
-            className="sous-texte"
-            style={{ marginTop: 0, marginBottom: 8, color: "var(--red)" }}
-          >
+      {phase === "envoi" && (
+        <div style={{ textAlign: "center" }}>
+          <p className="sous-texte">Analyse en cours…</p>
+        </div>
+      )}
+
+      {phase === "erreur" && (
+        <div style={{ textAlign: "center", maxWidth: 320 }}>
+          <p className="sous-texte" style={{ color: "var(--red)", marginBottom: 16 }}>
             {messageErreurLisible(erreurEnvoi)}
           </p>
           <button
             type="button"
             className="bouton bouton-primaire"
             onClick={relancer}
+            style={{ marginBottom: 12, width: "100%" }}
           >
             Réessayer
           </button>
+          <BoutonRetour />
         </div>
       )}
 
@@ -360,6 +257,25 @@ export default function Enrolement() {
         </div>
       )}
     </PageCadre>
+  );
+}
+
+function BoutonRetour() {
+  return (
+    <Link
+      to="/parcours"
+      className="bouton"
+      style={{
+        display: "inline-block",
+        marginTop: 12,
+        marginBottom: 8,
+        padding: "12px 20px",
+        textAlign: "center",
+        textDecoration: "none",
+      }}
+    >
+      ← Retour au choix
+    </Link>
   );
 }
 

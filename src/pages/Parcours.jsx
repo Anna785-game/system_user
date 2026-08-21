@@ -27,6 +27,11 @@ export default function Parcours() {
   const [demoBusy, setDemoBusy] = useState(false);
   const [uidFactice, setUidFactice] = useState(null);
 
+  // --- Enrôlement kiosque ---
+  const [enrolementEcranEnCours, setEnrolementEcranEnCours] = useState(false);
+  const [enrolementEcranMsg, setEnrolementEcranMsg] = useState(null);
+  const [enrolementEcranErreur, setEnrolementEcranErreur] = useState(null);
+
   useEffect(() => {
     if (!candidatId) navigate("/");
   }, [candidatId, navigate]);
@@ -36,6 +41,15 @@ export default function Parcours() {
     2500,
     [candidatId]
   );
+
+  // Dès que le visage est enrôlé (téléphone OU écran), on arrête le mode "en attente kiosque"
+  useEffect(() => {
+    if (candidat?.visage_enrole) {
+      setEnrolementEcranEnCours(false);
+      setEnrolementEcranMsg(null);
+      setEnrolementEcranErreur(null);
+    }
+  }, [candidat?.visage_enrole]);
 
   function confirmerPwd(e) {
     e.preventDefault();
@@ -78,6 +92,23 @@ export default function Parcours() {
       setDemoMsg(err.message || "Erreur");
     } finally {
       setDemoBusy(false);
+    }
+  }
+
+  async function demanderEnrolementSurEcran() {
+    setEnrolementEcranErreur(null);
+    setEnrolementEcranMsg(null);
+    setEnrolementEcranEnCours(true);
+    try {
+      await api.demanderEnrolementEcran(candidatId);
+      setEnrolementEcranMsg(
+        "Demande envoyée. Placez-vous maintenant devant l’écran de l’entreprise pour enregistrer votre visage."
+      );
+    } catch (err) {
+      setEnrolementEcranEnCours(false);
+      setEnrolementEcranErreur(
+        err.message || "Impossible de contacter l’écran. Réessayez."
+      );
     }
   }
 
@@ -249,6 +280,7 @@ export default function Parcours() {
           </div>
         )}
 
+        {/* ========== CHOIX D'ENRÔLEMENT (téléphone OU écran) ========== */}
         {statut === "actif" && !poste && !candidat.visage_enrole && (
           <div className="carte-badge">
             <p
@@ -257,27 +289,68 @@ export default function Parcours() {
             >
               Vous avez été sélectionné !
             </p>
-            <p className="sous-texte" style={{ marginTop: 0, marginBottom: 16 }}>
-              Dernière étape avant votre poste : enrôlez votre visage
-              directement depuis ce téléphone, avec votre caméra frontale.
+            <p className="sous-texte" style={{ marginTop: 0, marginBottom: 20 }}>
+              Enregistrez votre visage pour continuer. Choisissez la méthode
+              qui vous convient :
             </p>
-            <style>{`
-              @keyframes clignote-enroler {
-                0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(56, 189, 148, 0.55); }
-                50% { opacity: 0.85; box-shadow: 0 0 0 10px rgba(56, 189, 148, 0); }
-              }
-            `}</style>
+
+            {/* Bouton 1 : téléphone */}
             <Link
               to="/enrolement"
               className="bouton bouton-primaire"
               style={{
-                display: "inline-block",
-                padding: "16px 30px",
-                animation: "clignote-enroler 1.5s ease-in-out infinite",
+                display: "block",
+                textAlign: "center",
+                padding: "16px 24px",
+                marginBottom: 12,
               }}
             >
-              Enrôler mon visage
+              S’enrôler sur ce téléphone
             </Link>
+
+            {/* Bouton 2 : écran kiosque */}
+            <button
+              type="button"
+              className="bouton"
+              style={{
+                width: "100%",
+                padding: "16px 24px",
+                opacity: enrolementEcranEnCours ? 0.7 : 1,
+              }}
+              disabled={enrolementEcranEnCours}
+              onClick={demanderEnrolementSurEcran}
+            >
+              {enrolementEcranEnCours
+                ? "Demande envoyée…"
+                : "S’enrôler sur l’écran"}
+            </button>
+
+            {enrolementEcranMsg && (
+              <p
+                className="sous-texte"
+                style={{
+                  marginTop: 16,
+                  marginBottom: 0,
+                  color: "var(--green)",
+                  textAlign: "center",
+                }}
+              >
+                {enrolementEcranMsg}
+              </p>
+            )}
+            {enrolementEcranErreur && (
+              <p
+                className="sous-texte"
+                style={{
+                  marginTop: 16,
+                  marginBottom: 0,
+                  color: "var(--red)",
+                  textAlign: "center",
+                }}
+              >
+                {enrolementEcranErreur}
+              </p>
+            )}
           </div>
         )}
 
