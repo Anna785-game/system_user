@@ -3,8 +3,7 @@ import { useNavigate, Link } from "react-router-dom";
 import { api } from "../api/api";
 import { useCameraVisage } from "../hooks/useCameraVisage";
 
-// phases :
-//   "chargement" | "attente" | "compte" | "envoi" | "resultat" | "erreur"
+// phases : "chargement" | "attente" | "compte" | "envoi" | "resultat" | "erreur"
 
 export default function Enrolement() {
   const navigate = useNavigate();
@@ -14,8 +13,9 @@ export default function Enrolement() {
   const [nom, setNom] = useState("");
   const [resultat, setResultat] = useState(null);
   const [erreurEnvoi, setErreurEnvoi] = useState(null);
-  const [compte, setCompte] = useState(null); // secondes restantes
+  const [compte, setCompte] = useState(null);
 
+  // Caméra active pendant attente + compte (le flux ne doit jamais être coupé)
   const actif = phase === "attente" || phase === "compte";
   const { videoRef, pret, erreur: erreurCamera, capturerPhoto } =
     useCameraVisage(actif);
@@ -35,7 +35,6 @@ export default function Enrolement() {
           return;
         }
         if (c.visage_enrole) {
-          // Déjà enrôlé → on passe direct au choix de poste
           navigate("/choisir-poste");
           return;
         }
@@ -51,7 +50,7 @@ export default function Enrolement() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [candidatId]);
 
-  // Compte à rebours 5 s (capture à 2 s)
+  // Compte à rebours 5 s, capture à 2 s
   useEffect(() => {
     if (phase !== "compte") return;
 
@@ -59,8 +58,10 @@ export default function Enrolement() {
     const CAPTURE_A = 2000;
     const debut = Date.now();
     let dejaCapture = false;
+    let annule = false;
 
     const id = setInterval(async () => {
+      if (annule) return;
       const ecoule = Date.now() - debut;
       setCompte(Math.max(0, Math.ceil((DUREE - ecoule) / 1000)));
 
@@ -68,11 +69,14 @@ export default function Enrolement() {
         dejaCapture = true;
         try {
           const blob = await capturerPhoto();
+          if (annule) return;
           setPhase("envoi");
           await envoyerPhoto(blob);
         } catch (e) {
-          setErreurEnvoi(e);
-          setPhase("erreur");
+          if (!annule) {
+            setErreurEnvoi(e);
+            setPhase("erreur");
+          }
         }
       }
 
@@ -81,7 +85,10 @@ export default function Enrolement() {
       }
     }, 100);
 
-    return () => clearInterval(id);
+    return () => {
+      annule = true;
+      clearInterval(id);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase]);
 
@@ -122,8 +129,71 @@ export default function Enrolement() {
 
   return (
     <PageCadre titre="ENRÔLEMENT" nom={nom}>
-      {/* Bouton retour toujours visible tant qu'on n'a pas réussi */}
       {phase !== "resultat" && <BoutonRetour />}
+
+      {/* Vidéo TOUJOURS montée pendant attente + compte → le flux ne se coupe jamais */}
+      {(phase === "attente" || phase === "compte") && (
+        <div
+          style={{
+            position: "relative",
+            width: "100%",
+            maxWidth: 360,
+            aspectRatio: "3/4",
+            borderRadius: 16,
+            overflow: "hidden",
+            background: "#111",
+            marginBottom: 16,
+          }}
+        >
+          <video
+            ref={videoRef}
+            muted
+            playsInline
+            style={{
+              width: "100%",
+              height: "100%",
+              objectFit: "cover",
+              transform: "scaleX(-1)",
+            }}
+          />
+          {!pret && !erreurCamera && (
+            <div
+              style={{
+                position: "absolute",
+                inset: 0,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                background: "rgba(0,0,0,0.5)",
+                color: "var(--text-dim)",
+              }}
+            >
+              Activation de la caméra...
+            </div>
+          )}
+
+          {/* Overlay compte à rebours par-dessus la vidéo */}
+          {phase === "compte" && (
+            <div
+              style={{
+                position: "absolute",
+                inset: 0,
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+                background: "rgba(0,0,0,0.45)",
+                color: "#fff",
+              }}
+            >
+              <p style={{ margin: 0, fontSize: "1.1rem" }}>Ne bougez plus…</p>
+              <p style={{ margin: "12px 0 0", fontSize: "3.5rem", fontWeight: 700 }}>
+                {compte}
+              </p>
+            </div>
+          )}
+        </div>
+      )}
 
       {phase === "attente" && (
         <div style={{ textAlign: "center", width: "100%", maxWidth: 360 }}>
@@ -133,45 +203,6 @@ export default function Enrolement() {
           <p className="sous-texte" style={{ marginBottom: 16 }}>
             Placez votre visage dans le cadre, puis appuyez sur « Je suis prêt ».
           </p>
-
-          <div
-            style={{
-              position: "relative",
-              width: "100%",
-              aspectRatio: "3/4",
-              borderRadius: 16,
-              overflow: "hidden",
-              background: "#111",
-              marginBottom: 16,
-            }}
-          >
-            <video
-              ref={videoRef}
-              muted
-              playsInline
-              style={{
-                width: "100%",
-                height: "100%",
-                objectFit: "cover",
-                transform: "scaleX(-1)", // miroir selfie
-              }}
-            />
-            {!pret && !erreurCamera && (
-              <div
-                style={{
-                  position: "absolute",
-                  inset: 0,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  background: "rgba(0,0,0,0.5)",
-                  color: "var(--text-dim)",
-                }}
-              >
-                Activation de la caméra...
-              </div>
-            )}
-          </div>
 
           {erreurCamera && (
             <p className="sous-texte" style={{ color: "var(--red)", marginBottom: 12 }}>
@@ -188,28 +219,6 @@ export default function Enrolement() {
           >
             {pret ? "Je suis prêt" : "Caméra en cours…"}
           </button>
-        </div>
-      )}
-
-      {phase === "compte" && (
-        <div style={{ textAlign: "center" }}>
-          <h1 className="grand-titre" style={{ fontSize: "1.4rem" }}>
-            Ne bougez plus…
-          </h1>
-          <p className="sous-texte" style={{ fontSize: "3rem", margin: "24px 0" }}>
-            {compte}
-          </p>
-          <video
-            ref={videoRef}
-            muted
-            playsInline
-            style={{
-              width: "100%",
-              maxWidth: 280,
-              borderRadius: 12,
-              transform: "scaleX(-1)",
-            }}
-          />
         </div>
       )}
 

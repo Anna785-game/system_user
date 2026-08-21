@@ -1,12 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 
-// Ouvre la caméra FRONTALE du téléphone (facingMode "user") tant que
-// `actif` est vrai. Contrairement au hook équivalent de sys_ecran (qui
-// tourne sur un PC/tablette fixe avec une détection de présence en
-// continu), on ne fait pas de détection automatique de visage ici : sur
-// mobile, l'API FaceDetector est peu fiable/absente (Safari iOS), et une
-// simple confirmation manuelle de l'utilisateur ("Je suis prêt") avant de
-// lancer le compte à rebours est plus robuste.
 export function useCameraVisage(actif) {
   const videoRef = useRef(null);
   const [pret, setPret] = useState(false);
@@ -15,11 +8,13 @@ export function useCameraVisage(actif) {
   useEffect(() => {
     if (!actif) {
       setPret(false);
+      setErreur(null);
       return;
     }
 
-    let flux;
+    let flux = null;
     let annule = false;
+    let retryId = null;
 
     async function demarrer() {
       try {
@@ -31,34 +26,58 @@ export function useCameraVisage(actif) {
           flux.getTracks().forEach((t) => t.stop());
           return;
         }
-        if (videoRef.current) {
-          videoRef.current.srcObject = flux;
-          await videoRef.current.play();
-          setPret(true);
-        }
+
+        // Attendre que le <video> soit bien monté (évite la course)
+        const brancher = async () => {
+          if (annule || !flux) return;
+          const video = videoRef.current;
+          if (!video) {
+            retryId = setTimeout(brancher, 50);
+            return;
+          }
+          video.srcObject = flux;
+          try {
+            await video.play();
+            if (!annule) {
+              setPret(true);
+              setErreur(null);
+            }
+          } catch {
+            if (!annule) {
+              setErreur("Impossible de démarrer la caméra.");
+            }
+          }
+        };
+        brancher();
       } catch {
-        setErreur(
-          "Impossible d'accéder à la caméra frontale. Vérifiez l'autorisation caméra de votre navigateur."
-        );
+        if (!annule) {
+          setErreur(
+            "Impossible d'accéder à la caméra frontale. Vérifiez l'autorisation caméra de votre navigateur."
+          );
+          setPret(false);
+        }
       }
     }
+
     demarrer();
 
     return () => {
       annule = true;
+      if (retryId) clearTimeout(retryId);
       flux?.getTracks().forEach((t) => t.stop());
     };
   }, [actif]);
 
   function capturerPhoto() {
     const video = videoRef.current;
+    if (!video || !video.videoWidth) {
+      return Promise.reject(new Error("Caméra pas prête"));
+    }
     const canvas = document.createElement("canvas");
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
     const ctx = canvas.getContext("2d");
-    // Miroir horizontal : la vidéo est affichée en mode "selfie" (flip
-    // CSS), on capture donc l'image dans le même sens pour que la photo
-    // corresponde à ce que l'utilisateur a vu à l'écran.
+    // Miroir horizontal (même sens que l'affichage selfie)
     ctx.translate(canvas.width, 0);
     ctx.scale(-1, 1);
     ctx.drawImage(video, 0, 0);
